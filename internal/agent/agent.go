@@ -239,6 +239,12 @@ func (a *Agent) handleIncomingMessage(ctx context.Context, msg channel.Message) 
 		return
 	}
 
+	a.logEvent("message_delivered", map[string]string{
+		"from":    msg.Author,
+		"turn":    fmt.Sprintf("%d", msg.TurnNum),
+		"length":  fmt.Sprintf("%d", len(msg.Content)),
+	})
+
 	a.logger.Info("delivered message to session", "from", msg.Author, "turn", msg.TurnNum)
 }
 
@@ -257,6 +263,11 @@ func (a *Agent) handleSessionOutput(text string) {
 	// Advance the cursor past our own message so it doesn't count as unread
 	// and trigger phantom nudges.
 	a.channel.MarkRead(a.config.Name, msg.TurnNum+1)
+
+	a.logEvent("session_output", map[string]string{
+		"turn":   fmt.Sprintf("%d", msg.TurnNum),
+		"length": fmt.Sprintf("%d", len(text)),
+	})
 
 	a.logger.Info("posted to channel", "length", len(text))
 }

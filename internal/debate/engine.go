@@ -47,11 +47,12 @@ type Engine struct {
 	debateID string
 	logger   *slog.Logger
 
-	events  chan Event
-	done    chan struct{}
-	cancel  context.CancelFunc
-	started bool
-	mu      sync.Mutex
+	events       chan Event
+	done         chan struct{}
+	cancel       context.CancelFunc
+	hookCleanups []func()
+	started      bool
+	mu           sync.Mutex
 }
 
 // New creates a new debate engine. It opens the store, generates a debate ID,
@@ -141,6 +142,23 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("posting opening question: %w", err)
+	}
+
+	// Configure stop hooks so agents can't exit while the debate is active.
+	hookScript, err := GenerateStopHookScript(e.debateID)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("generating stop hook script: %w", err)
+	}
+
+	for _, model := range e.config.Models {
+		cleanup, hookErr := agent.ConfigureStopHook(agent.Provider(model), e.config.WorkDir, hookScript)
+		if hookErr != nil {
+			e.logger.Warn("failed to configure stop hook",
+				"provider", model, "error", hookErr)
+			continue
+		}
+		e.hookCleanups = append(e.hookCleanups, cleanup)
 	}
 
 	// Determine agent pairings. For a two-agent debate, each agent's opponent
@@ -358,6 +376,12 @@ func (e *Engine) Stop() error {
 			firstErr = err
 		}
 	}
+
+	// Run hook cleanup functions to remove hook configs and temp scripts.
+	for _, cleanup := range e.hookCleanups {
+		cleanup()
+	}
+	e.hookCleanups = nil
 
 	// Update hook state to inactive so stop hooks allow exit.
 	state := DebateState{
