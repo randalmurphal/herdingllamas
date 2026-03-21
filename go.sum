@@ -57,6 +57,8 @@ github.com/randalmurphal/llmkit v1.9.1 h1:0lu+FKz9+eSLAVSVq8F37rwfnSLmz7A+7zGiHp
 github.com/randalmurphal/llmkit v1.9.1/go.mod h1:fm+Y+Dsyu866vN5OR2Jl+HFxBV8SG5pdG1wv93zD8ic=
 github.com/randalmurphal/llmkit v1.9.2 h1:z6+t9TX9qoZfP0MCeeAjA6Zcqiwp8zvSiM8lJmrNBpU=
 github.com/randalmurphal/llmkit v1.9.2/go.mod h1:fm+Y+Dsyu866vN5OR2Jl+HFxBV8SG5pdG1wv93zD8ic=
+github.com/randalmurphal/llmkit v1.9.3 h1:zB33+4SvUW0swBndr2IYQhyhYClFc70xviUFJQ/NhwQ=
+github.com/randalmurphal/llmkit v1.9.3/go.mod h1:fm+Y+Dsyu866vN5OR2Jl+HFxBV8SG5pdG1wv93zD8ic=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
