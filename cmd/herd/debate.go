@@ -41,17 +41,21 @@ func debateCmd() *cobra.Command {
 				MaxBudgetUSD: maxBudget,
 			}
 
+			fmt.Println("Creating debate engine...")
 			engine, err := debate.New(cfg)
 			if err != nil {
 				return fmt.Errorf("create debate engine: %w", err)
 			}
 
+			fmt.Printf("Starting agents: %v\n", models)
+			fmt.Println("(This may take a moment while sessions initialize. Ctrl+C to abort.)")
 			events, err := engine.Start(ctx)
 			if err != nil {
 				engine.Stop()
 				return fmt.Errorf("start debate: %w", err)
 			}
 
+			fmt.Println("Agents ready. Launching debate TUI...")
 			m := tui.New(engine, events, question)
 			p := tea.NewProgram(m, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
