@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS messages (
     turn_num INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_debate ON messages(debate_id, turn_num);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_debate_turn ON messages(debate_id, turn_num);
 
 CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
@@ -47,3 +47,17 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_debate ON events(debate_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS agent_cursors (
+    debate_id TEXT NOT NULL REFERENCES debates(id),
+    agent_name TEXT NOT NULL,
+    last_read_turn INTEGER NOT NULL DEFAULT -1,
+    PRIMARY KEY (debate_id, agent_name)
+);
+
+CREATE TABLE IF NOT EXISTS conclusions (
+    debate_id TEXT NOT NULL REFERENCES debates(id),
+    agent_name TEXT NOT NULL,
+    concluded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (debate_id, agent_name)
+);

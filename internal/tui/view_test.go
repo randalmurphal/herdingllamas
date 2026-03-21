@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/randalmurphal/herdingllamas/internal/channel"
+	"github.com/randalmurphal/herdingllamas/internal/store"
 )
 
 func TestRenderMessage_FormatAndContent(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 12, 34, 5, 0, time.UTC)
-	msg := channel.Message{
+	msg := store.Message{
 		Author:    "claude",
 		Content:   "I think Postgres is the better choice.",
 		Timestamp: ts,
@@ -32,7 +32,7 @@ func TestRenderMessage_FormatAndContent(t *testing.T) {
 
 func TestRenderMessage_MultilineContent(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
-	msg := channel.Message{
+	msg := store.Message{
 		Author:    "codex",
 		Content:   "Line one.\nLine two.",
 		Timestamp: ts,
@@ -50,7 +50,7 @@ func TestRenderMessage_MultilineContent(t *testing.T) {
 
 func TestRenderMessage_SystemMessage(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
-	msg := channel.Message{
+	msg := store.Message{
 		Author:    "system",
 		Content:   "Debate started.",
 		Timestamp: ts,
@@ -67,10 +67,13 @@ func TestRenderMessage_SystemMessage(t *testing.T) {
 }
 
 func TestRenderHeader_ShowsQuestionAndStats(t *testing.T) {
-	result := RenderHeader("Should we use Postgres?", 2, 5, 3*time.Minute+42*time.Second, 80)
+	result := RenderHeader("Should we use Postgres?", 2, 5, 3*time.Minute+42*time.Second, 80, false)
 
 	if !strings.Contains(result, "Should we use Postgres?") {
 		t.Errorf("expected question in header, got:\n%s", result)
+	}
+	if !strings.Contains(result, "LIVE") {
+		t.Errorf("expected LIVE status in header, got:\n%s", result)
 	}
 	if !strings.Contains(result, "agents: 2") {
 		t.Errorf("expected agent count in header, got:\n%s", result)
@@ -85,7 +88,7 @@ func TestRenderHeader_ShowsQuestionAndStats(t *testing.T) {
 
 func TestRenderHeader_TruncatesLongQuestion(t *testing.T) {
 	longQuestion := strings.Repeat("x", 200)
-	result := RenderHeader(longQuestion, 1, 1, time.Second, 80)
+	result := RenderHeader(longQuestion, 1, 1, time.Second, 80, false)
 
 	if strings.Contains(result, longQuestion) {
 		t.Errorf("expected long question to be truncated, got:\n%s", result)
@@ -96,13 +99,35 @@ func TestRenderHeader_TruncatesLongQuestion(t *testing.T) {
 }
 
 func TestRenderFooter_ShowsControlsAndDebateID(t *testing.T) {
-	result := RenderFooter("abc-123", 80)
+	result := RenderFooter("abc-123", 80, false)
 
 	if !strings.Contains(result, "q quit") {
 		t.Errorf("expected 'q quit' in footer, got:\n%s", result)
 	}
 	if !strings.Contains(result, "abc-123") {
 		t.Errorf("expected debate ID in footer, got:\n%s", result)
+	}
+}
+
+func TestRenderHeader_ShowsEndedStatus(t *testing.T) {
+	result := RenderHeader("Test question", 2, 10, time.Minute, 80, true)
+
+	if !strings.Contains(result, "ENDED") {
+		t.Errorf("expected ENDED status in header, got:\n%s", result)
+	}
+	if strings.Contains(result, "LIVE") {
+		t.Errorf("expected no LIVE status when ended, got:\n%s", result)
+	}
+}
+
+func TestRenderFooter_ShowsDebateEndedHint(t *testing.T) {
+	result := RenderFooter("abc-123", 80, true)
+
+	if !strings.Contains(result, "debate ended") {
+		t.Errorf("expected 'debate ended' in footer, got:\n%s", result)
+	}
+	if !strings.Contains(result, "q quit") {
+		t.Errorf("expected 'q quit' in footer, got:\n%s", result)
 	}
 }
 

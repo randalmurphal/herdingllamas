@@ -1,13 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/randalmurphal/herdingllamas/internal/channel"
 	"github.com/randalmurphal/herdingllamas/internal/debate"
+	"github.com/randalmurphal/herdingllamas/internal/store"
 )
 
 // debateEventMsg wraps a debate.Event for the bubbletea message loop.
@@ -117,13 +118,34 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 		m.agents[ev.Agent] = false
 
 	case debate.EventDebateEnded:
+		m.debateEnded = true
 		// Mark all agents as inactive but don't quit -- let the user
 		// scroll through the debate and quit manually with 'q'.
 		for name := range m.agents {
 			m.agents[name] = false
 		}
-		// No follow-up event read since the channel is closed.
-		return m, nil
+		// Add a visual "debate ended" message to the transcript.
+		endMsg := synthesizeSystemMessage("Debate concluded. Press q to exit.")
+		m.messages = append(m.messages, endMsg)
+		m.content = renderAllMessages(m.messages, m.width)
+		if m.ready {
+			m.viewport.SetContent(m.content)
+			m.viewport.GotoBottom()
+		}
+		// Don't start a new waitForEvent (the channel is closing/closed),
+		// but keep the tick running so bubbletea's event loop stays alive
+		// and continues processing keyboard input.
+		return m, tickCmd()
+
+	case debate.EventConclusionProposed:
+		statusMsg := fmt.Sprintf("%s has proposed ending the debate", ev.Agent)
+		sysMsg := synthesizeSystemMessage(statusMsg)
+		m.messages = append(m.messages, sysMsg)
+		m.content = renderAllMessages(m.messages, m.width)
+		if m.ready {
+			m.viewport.SetContent(m.content)
+			m.viewport.GotoBottom()
+		}
 
 	case debate.EventError:
 		// Render errors as system messages so they appear in the chat.
@@ -149,7 +171,7 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 }
 
 // renderAllMessages rebuilds the full viewport content from all messages.
-func renderAllMessages(messages []channel.Message, width int) string {
+func renderAllMessages(messages []store.Message, width int) string {
 	if len(messages) == 0 {
 		return ""
 	}
@@ -157,17 +179,17 @@ func renderAllMessages(messages []channel.Message, width int) string {
 	var b strings.Builder
 	for i, msg := range messages {
 		if i > 0 {
-			b.WriteByte('\n')
+			b.WriteString("\n\n")
 		}
 		b.WriteString(RenderMessage(msg, width))
 	}
 	return b.String()
 }
 
-// synthesizeSystemMessage creates a channel.Message for display purposes
+// synthesizeSystemMessage creates a store.Message for display purposes
 // (e.g., errors, status updates) that did not originate from an agent.
-func synthesizeSystemMessage(text string) channel.Message {
-	return channel.Message{
+func synthesizeSystemMessage(text string) store.Message {
+	return store.Message{
 		Author:    "system",
 		Content:   text,
 		Timestamp: time.Now().UTC(),

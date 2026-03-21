@@ -166,6 +166,8 @@ print(json.dumps({'continue': True}))
 if [ $? -ne 0 ]; then
   printf '{"continue":true}\n'
 fi
+
+exit 0
 `, debateID, statePath)
 
 	return script, nil

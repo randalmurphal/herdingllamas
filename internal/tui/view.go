@@ -6,36 +6,43 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/randalmurphal/herdingllamas/internal/channel"
+	"github.com/randalmurphal/herdingllamas/internal/store"
 )
 
-// RenderMessage formats a single message as a Slack-like chat entry.
+// RenderMessage formats a single message as a Slack-like chat entry with a
+// colored left border per agent.
 // Format:
 //
-//	claude  12:34:05
-//	  Message content here, potentially
-//	  spanning multiple lines.
-func RenderMessage(msg channel.Message, width int) string {
+//	┃ claude  12:34:05
+//	┃   Message content here, potentially
+//	┃   spanning multiple lines.
+func RenderMessage(msg store.Message, width int) string {
 	name := NameStyle(msg.Author).Render(msg.Author)
 	ts := timestampStyle.Render(msg.Timestamp.Format("15:04:05"))
 	header := fmt.Sprintf("%s  %s", name, ts)
 
-	// Wrap content to fit within width minus 2 chars of left indent.
-	contentWidth := width - 4
+	// Content width accounts for the border (3 chars: border + space + padding).
+	contentWidth := width - 6
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
 	wrapped := WrapText(msg.Content, contentWidth)
 	body := contentStyle.Render(wrapped)
 
-	return header + "\n" + body
+	inner := header + "\n" + body
+	return MessageBorderStyle(msg.Author).Render(inner)
 }
 
 // RenderHeader renders the debate status bar.
-// Shows: debate question (truncated), agent count, message count, elapsed time.
-func RenderHeader(question string, agentCount, messageCount int, elapsed time.Duration, width int) string {
-	stats := fmt.Sprintf("agents: %d | msgs: %d | %s",
-		agentCount, messageCount, formatDuration(elapsed))
+// Shows: debate question (truncated), agent count, message count, elapsed time,
+// and a LIVE/ENDED status indicator.
+func RenderHeader(question string, agentCount, messageCount int, elapsed time.Duration, width int, ended bool) string {
+	status := "LIVE"
+	if ended {
+		status = "ENDED"
+	}
+	stats := fmt.Sprintf("%s | agents: %d | msgs: %d | %s",
+		status, agentCount, messageCount, formatDuration(elapsed))
 
 	// Leave room for stats plus padding/spacing.
 	maxQuestionWidth := width - len(stats) - 6
@@ -57,9 +64,13 @@ func RenderHeader(question string, agentCount, messageCount int, elapsed time.Du
 }
 
 // RenderFooter renders the controls bar.
-// Shows: "q quit  |  debate-id".
-func RenderFooter(debateID string, width int) string {
-	left := "q quit"
+// Shows scroll/quit hints on the left and the debate ID on the right.
+// After the debate ends, the left side includes a "debate ended" note.
+func RenderFooter(debateID string, width int, ended bool) string {
+	left := "↑↓ scroll | q quit"
+	if ended {
+		left = "↑↓ scroll | q quit | debate ended"
+	}
 	right := debateID
 
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 4 // 4 for padding

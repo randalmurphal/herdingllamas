@@ -43,13 +43,16 @@ func NewCodexAdapter(ctx context.Context, opts ...codexsession.SessionOption) (S
 }
 
 // readOutput reads from the Codex session's Output channel, extracts text
-// from agent_message items, and forwards it to the string output channel.
+// from agent messages (both streaming deltas and completed items), and
+// forwards it to the string output channel.
 func (a *codexAdapter) readOutput() {
 	defer close(a.done)
 	defer close(a.outputCh)
 
 	for msg := range a.session.Output() {
-		if !msg.IsAgentMessage() {
+		// Accept agent message items (item/started, item/completed with
+		// itemType=agentMessage) and streaming deltas (item/agentMessage/delta).
+		if !msg.IsAgentMessage() && !msg.IsAgentMessageDelta() {
 			continue
 		}
 		text := msg.GetText()

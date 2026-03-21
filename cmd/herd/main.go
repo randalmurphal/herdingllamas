@@ -15,6 +15,7 @@ func main() {
 	}
 
 	root.AddCommand(debateCmd())
+	root.AddCommand(channelCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

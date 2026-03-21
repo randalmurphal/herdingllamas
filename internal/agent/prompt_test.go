@@ -6,7 +6,7 @@ import (
 )
 
 func TestDebateSystemPrompt_ContainsNames(t *testing.T) {
-	prompt := DebateSystemPrompt("claude", "codex", "Should we use goroutines or channels?")
+	prompt := DebateSystemPrompt("claude", "codex", "Should we use goroutines or channels?", "/usr/local/bin/herd", "debate-123")
 
 	if !strings.Contains(prompt, "claude") {
 		t.Error("prompt should contain agent name 'claude'")
@@ -18,26 +18,47 @@ func TestDebateSystemPrompt_ContainsNames(t *testing.T) {
 
 func TestDebateSystemPrompt_ContainsQuestion(t *testing.T) {
 	question := "Should we use goroutines or channels?"
-	prompt := DebateSystemPrompt("claude", "codex", question)
+	prompt := DebateSystemPrompt("claude", "codex", question, "/usr/local/bin/herd", "debate-123")
 
 	if !strings.Contains(prompt, question) {
 		t.Error("prompt should contain the debate question")
 	}
 }
 
+func TestDebateSystemPrompt_ContainsToolCommands(t *testing.T) {
+	prompt := DebateSystemPrompt("claude", "codex", "test question", "/usr/local/bin/herd", "debate-abc")
+
+	commands := []struct {
+		fragment    string
+		description string
+	}{
+		{"/usr/local/bin/herd channel post --debate debate-abc --from claude", "should contain post command with correct binary, debate ID, and agent name"},
+		{"/usr/local/bin/herd channel read --debate debate-abc --agent claude", "should contain read command with correct binary, debate ID, and agent name"},
+		{"/usr/local/bin/herd channel wait --debate debate-abc --agent claude", "should contain wait command"},
+		{"/usr/local/bin/herd channel conclude --debate debate-abc --from claude", "should contain conclude command with correct binary, debate ID, and agent name"},
+	}
+
+	for _, tc := range commands {
+		if !strings.Contains(prompt, tc.fragment) {
+			t.Errorf("prompt should contain %q: %s\nGot:\n%s", tc.fragment, tc.description, prompt)
+		}
+	}
+}
+
 func TestDebateSystemPrompt_ContainsKeyInstructions(t *testing.T) {
-	prompt := DebateSystemPrompt("claude", "codex", "test question")
+	prompt := DebateSystemPrompt("claude", "codex", "test question", "/usr/local/bin/herd", "debate-123")
 
 	instructions := []struct {
 		keyword     string
 		description string
 	}{
-		{"research", "should instruct agent to research before responding"},
-		{"ENGAGE DIRECTLY", "should instruct agent to engage with specific points"},
+		{"RESEARCH FIRST", "should instruct agent to research before posting"},
+		{"POST DELIBERATELY", "should instruct agent to post substantive contributions"},
+		{"ENGAGE WITH ARGUMENTS", "should instruct agent to engage with opponent's points"},
 		{"CONCEDE", "should give permission to concede"},
-		{"conclusion", "should instruct agent to signal conclusion"},
-		{"CHECK MESSAGES", "should instruct agent to check messages before stopping"},
-		{"collaborative", "should frame as collaborative discussion"},
+		{"conclude command", "should instruct agent to use the conclude command"},
+		{"CHECK FOR MESSAGES", "should instruct agent to check for messages"},
+		{"CONVERSATIONAL RHYTHM", "should instruct agent about conversational rhythm"},
 	}
 
 	for _, tc := range instructions {
@@ -48,53 +69,19 @@ func TestDebateSystemPrompt_ContainsKeyInstructions(t *testing.T) {
 }
 
 func TestNudgeMessage(t *testing.T) {
-	tests := []struct {
-		name        string
-		count       int
-		authors     []string
-		wantContain []string
-	}{
-		{
-			name:    "single message single author",
-			count:   1,
-			authors: []string{"codex"},
-			wantContain: []string{
-				"[NOTIFICATION:",
-				"1 unread message(s)",
-				"codex",
-				"Read and respond when ready.",
-			},
-		},
-		{
-			name:    "multiple messages multiple authors",
-			count:   3,
-			authors: []string{"codex", "claude"},
-			wantContain: []string{
-				"3 unread message(s)",
-				"codex, claude",
-			},
-		},
-		{
-			name:    "no authors falls back to unknown",
-			count:   2,
-			authors: nil,
-			wantContain: []string{
-				"2 unread message(s)",
-				"unknown",
-			},
-		},
+	msg := NudgeMessage(3, "/usr/local/bin/herd", "debate-abc", "claude")
+
+	wantContain := []string{
+		"[NOTIFICATION:",
+		"3 unread message(s)",
+		"in the debate channel",
+		"/usr/local/bin/herd channel read --debate debate-abc --agent claude",
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			msg := NudgeMessage(tc.count, tc.authors)
-			for _, want := range tc.wantContain {
-				if !strings.Contains(msg, want) {
-					t.Errorf("NudgeMessage(%d, %v) = %q, should contain %q",
-						tc.count, tc.authors, msg, want)
-				}
-			}
-		})
+	for _, want := range wantContain {
+		if !strings.Contains(msg, want) {
+			t.Errorf("NudgeMessage() = %q, should contain %q", msg, want)
+		}
 	}
 }
 

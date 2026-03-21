@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/randalmurphal/herdingllamas/internal/agent"
-	"github.com/randalmurphal/herdingllamas/internal/channel"
 	"github.com/randalmurphal/herdingllamas/internal/store"
 )
 
@@ -24,28 +24,32 @@ const (
 	EventDebateStarted
 	EventDebateEnded
 	EventNudgeSent
+	EventConclusionProposed
 	EventError
 )
 
 // Event represents a debate lifecycle event for TUI consumption.
 type Event struct {
 	Type      EventType
-	Message   *channel.Message // Set for EventMessagePosted
-	Agent     string           // Set for agent-related events
-	Error     error            // Set for EventError
+	Message   *store.Message // Set for EventMessagePosted
+	Agent     string         // Set for agent-related events
+	Error     error          // Set for EventError
 	Timestamp time.Time
 }
 
+// pollInterval is how often the monitor checks SQLite for new messages.
+const pollInterval = time.Second
+
 // Engine orchestrates a multi-model debate. It creates agents, wires them to
-// a shared channel, monitors progress, and enforces limits (turns, duration,
-// budget). The TUI consumes the event stream returned by Start.
+// the store, monitors progress via SQLite polling, and enforces limits (turns,
+// duration, budget). The TUI consumes the event stream returned by Start.
 type Engine struct {
-	config   Config
-	store    *store.Store
-	channel  *channel.Channel
-	agents   []*agent.Agent
-	debateID string
-	logger   *slog.Logger
+	config     Config
+	store      *store.Store
+	agents     []*agent.Agent
+	debateID   string
+	herdBinary string
+	logger     *slog.Logger
 
 	events       chan Event
 	done         chan struct{}
@@ -56,13 +60,13 @@ type Engine struct {
 }
 
 // New creates a new debate engine. It opens the store, generates a debate ID,
-// inserts the debate record, and creates the communication channel.
+// inserts the debate record, and resolves the herd binary path.
 func New(cfg Config) (*Engine, error) {
 	if cfg.Question == "" {
 		return nil, fmt.Errorf("question must not be empty")
 	}
-	if len(cfg.Models) < 2 {
-		return nil, fmt.Errorf("at least 2 models are required, got %d", len(cfg.Models))
+	if len(cfg.Models) != 2 {
+		return nil, fmt.Errorf("exactly 2 models are required, got %d", len(cfg.Models))
 	}
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = "."
@@ -102,15 +106,20 @@ func New(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("inserting debate: %w", err)
 	}
 
-	ch := channel.New(debateID, st)
+	// Resolve the path to the herd binary so agents can invoke channel tools.
+	herdBinary, err := os.Executable()
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("resolving executable path: %w", err)
+	}
 
 	return &Engine{
-		config:   cfg,
-		store:    st,
-		channel:  ch,
-		debateID: debateID,
-		logger:   slog.Default().With("debate_id", debateID),
-		done:     make(chan struct{}),
+		config:     cfg,
+		store:      st,
+		debateID:   debateID,
+		herdBinary: herdBinary,
+		logger:     slog.Default().With("debate_id", debateID),
+		done:       make(chan struct{}),
 	}, nil
 }
 
@@ -131,11 +140,9 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 
 	e.events = make(chan Event, 100)
 
-	// Subscribe as "system" observer to receive all messages posted by agents.
-	systemSub := e.channel.Subscribe("system")
-
-	// Post the opening question as a moderator message so both agents see it.
-	_, err := e.channel.Post("moderator", fmt.Sprintf(
+	// Post the opening question as a moderator message so it appears in the
+	// channel when agents run `herd channel read`.
+	_, err := e.store.PostMessage(e.debateID, "moderator", fmt.Sprintf(
 		"DEBATE QUESTION: %s\n\nPlease present your arguments. You may respond to each other's points.",
 		e.config.Question,
 	))
@@ -162,8 +169,7 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 	}
 
 	// Determine agent pairings. For a two-agent debate, each agent's opponent
-	// is the other one. For >2 agents, opponent is set to empty (agents see
-	// all messages from the channel regardless).
+	// is the other one.
 	models := e.config.Models
 	opponentFor := func(i int) string {
 		if len(models) == 2 {
@@ -175,25 +181,19 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 	// Create each agent. agent.New creates its own LLM session internally
 	// based on the provider, but does not start the run loop.
 	for i, model := range models {
-		nudge := e.config.NudgeInterval
-		if nudge == 0 {
-			nudge = 30 * time.Second
-		}
-
 		a, err := agent.New(ctx, agent.Config{
 			Name:     model,
 			Provider: agent.Provider(model),
 			// Model is left empty so the session uses the provider's default
 			// model. The "model" variable here is a provider name (e.g.
 			// "claude", "codex"), not a model identifier.
-			Model:         "",
-			WorkDir:       e.config.WorkDir,
-			Question:      e.config.Question,
-			OpponentName:  opponentFor(i),
-			Channel:       e.channel,
-			Store:         e.store,
-			DebateID:      e.debateID,
-			NudgeInterval: nudge,
+			Model:        "",
+			WorkDir:      e.config.WorkDir,
+			Question:     e.config.Question,
+			OpponentName: opponentFor(i),
+			Store:        e.store,
+			DebateID:     e.debateID,
+			HerdBinary:   e.herdBinary,
 		})
 		if err != nil {
 			// Stop any agents we already started.
@@ -229,15 +229,16 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 		Timestamp: time.Now().UTC(),
 	})
 
-	// Monitor goroutine: watches messages, agent completion, and limits.
-	go e.monitor(ctx, systemSub)
+	// Monitor goroutine: polls SQLite for new messages, watches agent
+	// completion, and enforces limits.
+	go e.monitor(ctx)
 
 	return e.events, nil
 }
 
-// monitor runs in a goroutine and watches for messages, agent completion,
-// and debate limits. It closes the events channel when the debate ends.
-func (e *Engine) monitor(ctx context.Context, systemSub <-chan channel.Message) {
+// monitor runs in a goroutine and polls SQLite for new messages, watches for
+// agent completion, and enforces debate limits.
+func (e *Engine) monitor(ctx context.Context) {
 	defer close(e.events)
 
 	// Set up deadline timer if MaxDuration is configured.
@@ -248,11 +249,20 @@ func (e *Engine) monitor(ctx context.Context, systemSub <-chan channel.Message) 
 		deadline = timer.C
 	}
 
+	// Track message count for detecting new messages via SQLite polling.
+	lastMessageCount := 0
+
+	pollTicker := time.NewTicker(pollInterval)
+	defer pollTicker.Stop()
+
 	// Track which agents are still running.
 	agentDone := make(map[string]bool)
 
-	// Merge agent Done channels into a single channel. Each goroutine sends
-	// the agent name when its Done channel closes.
+	// Track which conclusion proposals we've already emitted events for,
+	// so we don't flood the TUI on every poll tick.
+	concludedSeen := make(map[string]bool)
+
+	// Merge agent Done channels into a single channel.
 	agentFinished := make(chan string, len(e.agents))
 	for _, a := range e.agents {
 		a := a
@@ -275,28 +285,102 @@ func (e *Engine) monitor(ctx context.Context, systemSub <-chan channel.Message) 
 			})
 			return
 
-		case msg, ok := <-systemSub:
-			if !ok {
-				return
+		case <-pollTicker.C:
+			messages, err := e.store.GetDebateMessages(e.debateID)
+			if err != nil {
+				e.logger.Error("polling messages", "error", err)
+				continue
 			}
-			e.emitEvent(Event{
-				Type:      EventMessagePosted,
-				Message:   &msg,
-				Agent:     msg.Author,
-				Timestamp: msg.Timestamp,
-			})
 
-			// Update hook state so stop hooks have current unread counts.
-			e.updateHookState()
+			if len(messages) > lastMessageCount {
+				newMessages := messages[lastMessageCount:]
+				lastMessageCount = len(messages)
 
-			// Check turn limit. The channel's turn count includes the
-			// moderator's opening message, so subtract 1 for agent turns only.
-			if e.config.MaxTurns > 0 {
-				agentTurns := e.channel.Len() - 1 // exclude moderator message
-				if agentTurns >= e.config.MaxTurns {
-					e.logger.Info("max turns reached", "turns", agentTurns)
-					e.Stop()
-					return
+				// Emit events for new messages and nudge other agents.
+				for _, msg := range newMessages {
+					msg := msg
+					e.emitEvent(Event{
+						Type:      EventMessagePosted,
+						Message:   &msg,
+						Agent:     msg.Author,
+						Timestamp: msg.Timestamp,
+					})
+
+					// Nudge all agents except the author of this message.
+					// This is event-driven: agents get notified immediately
+					// when there's something new to read, not on a timer.
+					if msg.Author != "moderator" && msg.Author != "system" {
+						for _, a := range e.agents {
+							if a.Name() != msg.Author {
+								unread, _ := e.store.GetUnreadCount(e.debateID, a.Name())
+								if unread > 0 {
+									a.Nudge(ctx, unread)
+								}
+							}
+						}
+					}
+				}
+
+				// Update hook state so stop hooks have current unread counts.
+				e.updateHookState()
+
+				// Check turn limit. Subtract 1 for the moderator's opening message.
+				if e.config.MaxTurns > 0 {
+					agentTurns := lastMessageCount - 1
+					if agentTurns >= e.config.MaxTurns {
+						e.logger.Info("max turns reached", "turns", agentTurns)
+						e.emitEvent(Event{
+							Type:      EventDebateEnded,
+							Timestamp: time.Now().UTC(),
+						})
+						// Cancel context to signal agents to stop, but
+						// don't call e.Stop() here. The monitor must
+						// return promptly so close(e.events) runs and
+						// unblocks the TUI's waitForEvent goroutine.
+						// Full cleanup (agent shutdown, DB close) happens
+						// when debate.go calls engine.Stop() after p.Run()
+						// returns.
+						e.cancel()
+						return
+					}
+				}
+			}
+
+			// Check if all agents have concluded the debate by mutual agreement.
+			concluded, err := e.store.GetConcluded(e.debateID)
+			if err != nil {
+				e.logger.Error("checking conclusions", "error", err)
+			} else if len(concluded) >= len(e.agents) {
+				e.logger.Info("all agents concluded")
+				e.emitEvent(Event{
+					Type:      EventDebateEnded,
+					Timestamp: time.Now().UTC(),
+				})
+				e.cancel()
+				return
+			} else {
+				// Emit events for newly-seen conclusion proposals.
+				for _, name := range concluded {
+					if !concludedSeen[name] {
+						concludedSeen[name] = true
+						e.emitEvent(Event{
+							Type:      EventConclusionProposed,
+							Agent:     name,
+							Timestamp: time.Now().UTC(),
+						})
+					}
+				}
+				// If an agent revoked their conclusion (by posting a new
+				// message), remove them from the seen set so we'd emit
+				// again if they re-conclude.
+				activeConclusions := make(map[string]bool, len(concluded))
+				for _, name := range concluded {
+					activeConclusions[name] = true
+				}
+				for name := range concludedSeen {
+					if !activeConclusions[name] {
+						delete(concludedSeen, name)
+					}
 				}
 			}
 
@@ -332,13 +416,21 @@ func (e *Engine) monitor(ctx context.Context, systemSub <-chan channel.Message) 
 			// If all agents are done, the debate is over.
 			if len(agentDone) >= len(e.agents) {
 				e.logger.Info("all agents finished")
-				e.Stop()
+				e.emitEvent(Event{
+					Type:      EventDebateEnded,
+					Timestamp: time.Now().UTC(),
+				})
+				e.cancel()
 				return
 			}
 
 		case <-deadline:
 			e.logger.Info("max duration reached")
-			e.Stop()
+			e.emitEvent(Event{
+				Type:      EventDebateEnded,
+				Timestamp: time.Now().UTC(),
+			})
+			e.cancel()
 			return
 		}
 	}
@@ -361,13 +453,34 @@ func (e *Engine) Stop() error {
 		e.cancel()
 	}
 
-	// Stop all agents.
-	var firstErr error
+	// Stop all agents in parallel with a hard timeout.
+	// Each agent's Stop() has its own internal timeouts, but we bound the
+	// entire shutdown so the user isn't stuck waiting.
+	agentErrs := make(chan error, len(e.agents))
 	for _, a := range e.agents {
-		if err := a.Stop(); err != nil && firstErr == nil {
-			firstErr = err
+		a := a
+		go func() {
+			agentErrs <- a.Stop()
+		}()
+	}
+
+	var firstErr error
+	shutdownTimeout := time.After(10 * time.Second)
+	for i := 0; i < len(e.agents); i++ {
+		select {
+		case err := <-agentErrs:
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+		case <-shutdownTimeout:
+			e.logger.Warn("agent shutdown timed out, proceeding with cleanup")
+			if firstErr == nil {
+				firstErr = fmt.Errorf("agent shutdown timed out")
+			}
+			goto cleanup
 		}
 	}
+cleanup:
 
 	// Mark debate as completed in the store.
 	if err := e.store.EndDebate(e.debateID, "completed"); err != nil {
@@ -415,11 +528,6 @@ func (e *Engine) DebateID() string {
 	return e.debateID
 }
 
-// Channel returns the underlying communication channel.
-func (e *Engine) Channel() *channel.Channel {
-	return e.channel
-}
-
 // emitEvent sends an event to the events channel without blocking. If the
 // channel buffer is full, the event is dropped and logged.
 func (e *Engine) emitEvent(ev Event) {
@@ -441,7 +549,12 @@ func (e *Engine) updateHookState() {
 	}
 
 	for _, a := range e.agents {
-		pending := e.channel.Pending(a.Name())
+		unread, err := e.store.GetUnreadCount(e.debateID, a.Name())
+		if err != nil {
+			e.logger.Error("getting unread count for hook state", "agent", a.Name(), "error", err)
+			unread = 0
+		}
+
 		status := "running"
 		select {
 		case <-a.Done():
@@ -453,7 +566,7 @@ func (e *Engine) updateHookState() {
 		}
 
 		state.Agents[a.Name()] = AgentState{
-			UnreadCount: pending.UnreadCount,
+			UnreadCount: unread,
 			Status:      status,
 		}
 	}

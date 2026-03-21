@@ -16,7 +16,7 @@ var (
 	systemNameStyle = lipgloss.NewStyle().Foreground(systemColor).Italic(true)
 
 	timestampStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6E7681")).Faint(true)
-	contentStyle   = lipgloss.NewStyle().PaddingLeft(2)
+	contentStyle   = lipgloss.NewStyle()
 
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -30,6 +30,39 @@ var (
 
 	dividerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#30363D"))
 )
+
+// Border styles for per-agent colored left borders.
+var (
+	claudeBorderStyle = lipgloss.NewStyle().
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(claudeColor).
+				PaddingLeft(1)
+
+	codexBorderStyle = lipgloss.NewStyle().
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(codexColor).
+				PaddingLeft(1)
+
+	systemBorderStyle = lipgloss.NewStyle().
+				BorderLeft(true).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(systemColor).
+				PaddingLeft(1)
+)
+
+// MessageBorderStyle returns the left-border style for a given agent.
+func MessageBorderStyle(agent string) lipgloss.Style {
+	switch agent {
+	case "claude":
+		return claudeBorderStyle
+	case "codex":
+		return codexBorderStyle
+	default:
+		return systemBorderStyle
+	}
+}
 
 // NameStyle returns the appropriate style for an agent name.
 func NameStyle(agent string) lipgloss.Style {

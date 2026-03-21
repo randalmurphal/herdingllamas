@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -131,10 +132,10 @@ func DefaultDBPath() (string, error) {
 }
 
 func applySchema(db *sql.DB) error {
-	// Enable WAL mode and foreign keys for better concurrent access.
-	// busy_timeout prevents immediate SQLITE_BUSY errors under contention.
+	// Set pragmas explicitly for the in-memory path (OpenInMemory) which
+	// doesn't use DSN parameters. For the file-based path (Open), these
+	// are already set via DSN but re-applying is harmless.
 	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
 	}
@@ -411,6 +412,338 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+// --- Cursors ---
+
+// PostMessage atomically assigns the next turn number and inserts a message.
+// This is used by the CLI channel commands where the caller doesn't know the
+// next turn number. The turn number is determined within a transaction to
+// prevent races between concurrent posters.
+func (s *Store) PostMessage(debateID, author, content string) (Message, error) {
+	// Use BEGIN IMMEDIATE to acquire the write lock before the SELECT.
+	// This prevents a TOCTOU race where two concurrent processes both
+	// SELECT the same MAX(turn_num) then both INSERT with the same value.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Message{}, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Acquire write lock immediately. In WAL mode, this serializes
+	// concurrent writers from different processes.
+	if _, err := tx.Exec("UPDATE debates SET id = id WHERE id = ?", debateID); err != nil {
+		return Message{}, fmt.Errorf("acquiring write lock: %w", err)
+	}
+
+	var nextTurn int
+	err = tx.QueryRow(
+		"SELECT COALESCE(MAX(turn_num), -1) + 1 FROM messages WHERE debate_id = ?",
+		debateID,
+	).Scan(&nextTurn)
+	if err != nil {
+		return Message{}, fmt.Errorf("getting next turn number: %w", err)
+	}
+
+	id := uuid.New().String()
+	now := time.Now().UTC()
+
+	_, err = tx.Exec(
+		`INSERT INTO messages (id, debate_id, author, content, timestamp, turn_num)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		id, debateID, author, content, now, nextTurn,
+	)
+	if err != nil {
+		return Message{}, fmt.Errorf("inserting message: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Message{}, fmt.Errorf("committing transaction: %w", err)
+	}
+
+	return Message{
+		ID:        id,
+		DebateID:  debateID,
+		Author:    author,
+		Content:   content,
+		Timestamp: now,
+		TurnNum:   nextTurn,
+	}, nil
+}
+
+// GetUnreadCount returns the number of messages from other agents that this
+// agent has not yet read. Used by the nudge loop to decide whether to send
+// a notification. If no cursor exists, all non-self messages are unread.
+func (s *Store) GetUnreadCount(debateID, agentName string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM messages
+		WHERE debate_id = ?
+		  AND author != ?
+		  AND turn_num > COALESCE(
+		      (SELECT last_read_turn FROM agent_cursors
+		       WHERE debate_id = ? AND agent_name = ?),
+		      -1
+		  )
+	`, debateID, agentName, debateID, agentName).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting unread messages: %w", err)
+	}
+	return count, nil
+}
+
+// GetUnreadMessages returns all messages since the agent's read cursor,
+// ordered by turn number. Includes the agent's own messages for full context.
+// If no cursor exists, returns all messages in the debate.
+func (s *Store) GetUnreadMessages(debateID, agentName string) ([]Message, error) {
+	rows, err := s.db.Query(`
+		SELECT id, debate_id, author, content, timestamp, turn_num
+		FROM messages
+		WHERE debate_id = ?
+		  AND turn_num > COALESCE(
+		      (SELECT last_read_turn FROM agent_cursors
+		       WHERE debate_id = ? AND agent_name = ?),
+		      -1
+		  )
+		ORDER BY turn_num ASC
+	`, debateID, debateID, agentName)
+	if err != nil {
+		return nil, fmt.Errorf("getting unread messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.DebateID, &m.Author, &m.Content, &m.Timestamp, &m.TurnNum); err != nil {
+			return nil, fmt.Errorf("scanning message row: %w", err)
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+// UpdateCursor upserts the read cursor for an agent. The cursor only advances
+// forward — passing a lower turn number than the current cursor is a no-op.
+func (s *Store) UpdateCursor(debateID, agentName string, turnNum int) error {
+	_, err := s.db.Exec(`
+		INSERT INTO agent_cursors (debate_id, agent_name, last_read_turn)
+		VALUES (?, ?, ?)
+		ON CONFLICT(debate_id, agent_name) DO UPDATE
+		SET last_read_turn = MAX(excluded.last_read_turn, agent_cursors.last_read_turn)
+	`, debateID, agentName, turnNum)
+	if err != nil {
+		return fmt.Errorf("updating cursor for %s: %w", agentName, err)
+	}
+	return nil
+}
+
+// --- Conclusions ---
+
+// SetConcluded records that an agent has proposed ending the debate.
+// If the agent already has a conclusion recorded, this is a no-op (upsert).
+func (s *Store) SetConcluded(debateID, agentName string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO conclusions (debate_id, agent_name)
+		VALUES (?, ?)
+		ON CONFLICT(debate_id, agent_name) DO NOTHING
+	`, debateID, agentName)
+	if err != nil {
+		return fmt.Errorf("setting concluded for %s in debate %s: %w", agentName, debateID, err)
+	}
+	return nil
+}
+
+// RevokeConcluded removes an agent's conclusion vote. This is called when
+// an agent posts a new message after concluding (they changed their mind).
+// If no conclusion exists, this is a no-op.
+func (s *Store) RevokeConcluded(debateID, agentName string) error {
+	_, err := s.db.Exec(`
+		DELETE FROM conclusions
+		WHERE debate_id = ? AND agent_name = ?
+	`, debateID, agentName)
+	if err != nil {
+		return fmt.Errorf("revoking conclusion for %s in debate %s: %w", agentName, debateID, err)
+	}
+	return nil
+}
+
+// GetConcluded returns the list of agent names that have concluded in a debate.
+func (s *Store) GetConcluded(debateID string) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT agent_name FROM conclusions
+		WHERE debate_id = ?
+		ORDER BY concluded_at ASC
+	`, debateID)
+	if err != nil {
+		return nil, fmt.Errorf("getting conclusions for debate %s: %w", debateID, err)
+	}
+	defer rows.Close()
+
+	var agents []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scanning conclusion row: %w", err)
+		}
+		agents = append(agents, name)
+	}
+	return agents, rows.Err()
+}
+
+// AllConcluded returns true if the number of conclusion votes for a debate
+// is at least expectedAgents.
+func (s *Store) AllConcluded(debateID string, expectedAgents int) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM conclusions WHERE debate_id = ?
+	`, debateID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("counting conclusions for debate %s: %w", debateID, err)
+	}
+	return count >= expectedAgents, nil
+}
+
+// --- Status Queries ---
+
+// AgentStatus contains the current state of an agent in a debate for display
+// in channel tool output.
+type AgentStatus struct {
+	Name         string
+	LastReadTurn int // -1 if never read
+	LastPostTurn int // -1 if never posted
+}
+
+// GetAgentStatuses returns the status of all agents in a debate. Agent names
+// are derived from the messages table (DISTINCT author excluding moderator and
+// system) since the agents table may not be populated when CLI tools run.
+func (s *Store) GetAgentStatuses(debateID string) ([]AgentStatus, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT author FROM messages
+		WHERE debate_id = ? AND author NOT IN ('moderator', 'system')
+		ORDER BY author ASC
+	`, debateID)
+	if err != nil {
+		return nil, fmt.Errorf("getting agent names for debate %s: %w", debateID, err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scanning agent name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating agent names: %w", err)
+	}
+
+	statuses := make([]AgentStatus, 0, len(names))
+	for _, name := range names {
+		status := AgentStatus{
+			Name:         name,
+			LastReadTurn: -1,
+			LastPostTurn: -1,
+		}
+
+		// Get last_read_turn from agent_cursors.
+		var lastRead sql.NullInt64
+		err := s.db.QueryRow(`
+			SELECT last_read_turn FROM agent_cursors
+			WHERE debate_id = ? AND agent_name = ?
+		`, debateID, name).Scan(&lastRead)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("getting cursor for %s: %w", name, err)
+		}
+		if lastRead.Valid {
+			status.LastReadTurn = int(lastRead.Int64)
+		}
+
+		// Get max turn_num from messages (last post).
+		var lastPost sql.NullInt64
+		err = s.db.QueryRow(`
+			SELECT MAX(turn_num) FROM messages
+			WHERE debate_id = ? AND author = ?
+		`, debateID, name).Scan(&lastPost)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("getting last post for %s: %w", name, err)
+		}
+		if lastPost.Valid {
+			status.LastPostTurn = int(lastPost.Int64)
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	return statuses, nil
+}
+
+// --- Wait-oriented Queries ---
+
+// GetLatestTurnNum returns the highest turn number in a debate, or -1 if empty.
+func (s *Store) GetLatestTurnNum(debateID string) (int, error) {
+	var turnNum sql.NullInt64
+	err := s.db.QueryRow(`
+		SELECT MAX(turn_num) FROM messages WHERE debate_id = ?
+	`, debateID).Scan(&turnNum)
+	if err != nil {
+		return -1, fmt.Errorf("getting latest turn for debate %s: %w", debateID, err)
+	}
+	if !turnNum.Valid {
+		return -1, nil
+	}
+	return int(turnNum.Int64), nil
+}
+
+// GetMessagesAfterTurn returns messages with turn_num > afterTurn from authors
+// other than excludeAuthor.
+func (s *Store) GetMessagesAfterTurn(debateID string, afterTurn int, excludeAuthor string) ([]Message, error) {
+	rows, err := s.db.Query(`
+		SELECT id, debate_id, author, content, timestamp, turn_num
+		FROM messages
+		WHERE debate_id = ?
+		  AND turn_num > ?
+		  AND author != ?
+		  AND author NOT IN ('moderator', 'system')
+		ORDER BY turn_num ASC
+	`, debateID, afterTurn, excludeAuthor)
+	if err != nil {
+		return nil, fmt.Errorf("getting messages after turn %d: %w", afterTurn, err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.DebateID, &m.Author, &m.Content, &m.Timestamp, &m.TurnNum); err != nil {
+			return nil, fmt.Errorf("scanning message row: %w", err)
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+// HasCursorAdvancedPast checks if any agent other than the given one has a
+// cursor >= turnNum. Returns (agentName, true, nil) if someone has read past
+// turnNum, or ("", false, nil) if not.
+func (s *Store) HasCursorAdvancedPast(debateID, excludeAgent string, turnNum int) (string, bool, error) {
+	var name string
+	err := s.db.QueryRow(`
+		SELECT agent_name FROM agent_cursors
+		WHERE debate_id = ?
+		  AND agent_name != ?
+		  AND last_read_turn >= ?
+		LIMIT 1
+	`, debateID, excludeAgent, turnNum).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("checking cursor advancement: %w", err)
+	}
+	return name, true, nil
 }
 
 // checkRowAffected verifies that an update modified exactly one row.

@@ -18,7 +18,6 @@ func debateCmd() *cobra.Command {
 	var models []string
 	var maxTurns int
 	var maxDuration time.Duration
-	var maxBudget float64
 	var workDir string
 
 	cmd := &cobra.Command{
@@ -33,12 +32,11 @@ func debateCmd() *cobra.Command {
 			question := args[0]
 
 			cfg := debate.Config{
-				Question:     question,
-				Models:       models,
-				WorkDir:      workDir,
-				MaxTurns:     maxTurns,
-				MaxDuration:  maxDuration,
-				MaxBudgetUSD: maxBudget,
+				Question:    question,
+				Models:      models,
+				WorkDir:     workDir,
+				MaxTurns:    maxTurns,
+				MaxDuration: maxDuration,
 			}
 
 			fmt.Println("Creating debate engine...")
@@ -74,7 +72,6 @@ func debateCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&models, "models", []string{"claude", "codex"}, "Models to debate (comma-separated)")
 	cmd.Flags().IntVar(&maxTurns, "max-turns", 0, "Maximum debate turns (0=unlimited)")
 	cmd.Flags().DurationVar(&maxDuration, "max-duration", 0, "Maximum debate duration (0=unlimited)")
-	cmd.Flags().Float64Var(&maxBudget, "max-budget", 0, "Maximum budget in USD (0=unlimited)")
 	cmd.Flags().StringVar(&workDir, "workdir", ".", "Working directory for agent sessions")
 
 	return cmd

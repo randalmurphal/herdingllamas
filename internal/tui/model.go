@@ -5,8 +5,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/randalmurphal/herdingllamas/internal/channel"
 	"github.com/randalmurphal/herdingllamas/internal/debate"
+	"github.com/randalmurphal/herdingllamas/internal/store"
 )
 
 // Model is the bubbletea model for the debate TUI.
@@ -16,16 +16,17 @@ type Model struct {
 	engine    *debate.Engine
 	question  string
 	debateID  string
-	messages  []channel.Message
+	messages  []store.Message
 	agents    map[string]bool // agent name -> still active
 	startTime time.Time
 
 	// TUI state
-	viewport viewport.Model
-	width    int
-	height   int
-	ready    bool
-	quitting bool
+	viewport    viewport.Model
+	width       int
+	height      int
+	ready       bool
+	quitting    bool
+	debateEnded bool
 
 	// Rendering
 	content string // Full rendered content for viewport
@@ -68,10 +69,11 @@ func (m Model) View() string {
 		len(m.messages),
 		time.Since(m.startTime),
 		m.width,
+		m.debateEnded,
 	)
 	topDivider := RenderDivider(m.width)
 	bottomDivider := RenderDivider(m.width)
-	footer := RenderFooter(m.debateID, m.width)
+	footer := RenderFooter(m.debateID, m.width, m.debateEnded)
 
 	return header + "\n" +
 		topDivider + "\n" +
