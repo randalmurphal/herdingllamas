@@ -451,6 +451,42 @@ func TestPostWorkflowAgainstNonActiveDebate(t *testing.T) {
 
 // --- Ordering ---
 
+// --- unescapeContent ---
+
+func TestUnescapeContentNewlines(t *testing.T) {
+	got := unescapeContent(`Here is my analysis:\n\n1. First point\n2. Second point`)
+	want := "Here is my analysis:\n\n1. First point\n2. Second point"
+	if got != want {
+		t.Errorf("unescapeContent newlines:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestUnescapeContentTabs(t *testing.T) {
+	got := unescapeContent(`column1\tcolumn2`)
+	want := "column1\tcolumn2"
+	if got != want {
+		t.Errorf("unescapeContent tabs:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestUnescapeContentNoEscapes(t *testing.T) {
+	input := "plain text with no escapes"
+	got := unescapeContent(input)
+	if got != input {
+		t.Errorf("unescapeContent plain:\ngot:  %q\nwant: %q", got, input)
+	}
+}
+
+func TestUnescapeContentPreservesRealNewlines(t *testing.T) {
+	input := "line1\nline2"
+	got := unescapeContent(input)
+	if got != input {
+		t.Errorf("unescapeContent real newlines:\ngot:  %q\nwant: %q", got, input)
+	}
+}
+
+// --- Ordering ---
+
 func TestGetUnreadMessagesOrderedByTurnNum(t *testing.T) {
 	s := mustOpenStore(t)
 	debateID := insertActiveDebate(t, s)

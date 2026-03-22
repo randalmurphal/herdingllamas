@@ -56,7 +56,12 @@ func channelPostCmd() *cobra.Command {
 				return fmt.Errorf("debate %s is %s, not active", debateID, debate.Status)
 			}
 
-			msg, err := st.PostMessage(debateID, from, args[0])
+			// Unescape common escape sequences. LLMs (especially Codex)
+		// frequently generate \n and \t in double-quoted shell strings,
+		// which bash passes through as literal characters.
+		content := unescapeContent(args[0])
+
+		msg, err := st.PostMessage(debateID, from, content)
 			if err != nil {
 				return fmt.Errorf("posting message: %w", err)
 			}
@@ -333,6 +338,16 @@ func formatOtherAgentStatuses(statuses []store.AgentStatus, excludeAgent string)
 		parts = append(parts, fmt.Sprintf("%s %s", s.Name, strings.Join(fragments, ", ")))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// unescapeContent replaces literal escape sequences (\n, \t) with their
+// actual characters. LLMs generating shell commands often write \n inside
+// double-quoted strings, which bash passes through as the two literal
+// characters '\' and 'n' rather than a newline. This normalizes both forms
+// so messages display correctly regardless of how the LLM quoted them.
+func unescapeContent(s string) string {
+	r := strings.NewReplacer(`\n`, "\n", `\t`, "\t")
+	return r.Replace(s)
 }
 
 func channelConcludeCmd() *cobra.Command {
