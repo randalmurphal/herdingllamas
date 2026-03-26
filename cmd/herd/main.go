@@ -15,6 +15,8 @@ func main() {
 	}
 
 	root.AddCommand(debateCmd())
+	root.AddCommand(exploreCmd())
+	root.AddCommand(summaryCmd())
 	root.AddCommand(channelCmd())
 
 	if err := root.Execute(); err != nil {

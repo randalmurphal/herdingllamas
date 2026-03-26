@@ -140,12 +140,19 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 
 	e.events = make(chan Event, 100)
 
-	// Post the opening question as a moderator message so it appears in the
+	// Post the opening message as a moderator message so it appears in the
 	// channel when agents run `herd channel read`.
-	_, err := e.store.PostMessage(e.debateID, "moderator", fmt.Sprintf(
+	openingMsg := fmt.Sprintf(
 		"DEBATE QUESTION: %s\n\nPlease present your arguments. You may respond to each other's points.",
 		e.config.Question,
-	))
+	)
+	if e.config.Mode == ModeExplore {
+		openingMsg = fmt.Sprintf(
+			"EXPLORATION TOPIC: %s\n\nConnector: find analogies and patterns from unrelated domains. Critic: evaluate them against reality.",
+			e.config.Question,
+		)
+	}
+	_, err := e.store.PostMessage(e.debateID, "moderator", openingMsg)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("posting opening question: %w", err)
@@ -181,7 +188,7 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 	// Create each agent. agent.New creates its own LLM session internally
 	// based on the provider, but does not start the run loop.
 	for i, model := range models {
-		a, err := agent.New(ctx, agent.Config{
+		agentCfg := agent.Config{
 			Name:     model,
 			Provider: agent.Provider(model),
 			// Model is left empty so the session uses the provider's default
@@ -194,7 +201,27 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 			Store:        e.store,
 			DebateID:     e.debateID,
 			HerdBinary:   e.herdBinary,
-		})
+		}
+
+		// In explore mode, the first model is the Connector (lateral
+		// thinker) and the second is the Critic (reality checker).
+		if e.config.Mode == ModeExplore {
+			if i == 0 {
+				agentCfg.SystemPrompt = agent.ConnectorSystemPrompt(
+					model, opponentFor(i), e.config.Question,
+					e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.ConnectorInitialMessage
+			} else {
+				agentCfg.SystemPrompt = agent.CriticSystemPrompt(
+					model, opponentFor(i), e.config.Question,
+					e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.CriticInitialMessage
+			}
+		}
+
+		a, err := agent.New(ctx, agentCfg)
 		if err != nil {
 			// Stop any agents we already started.
 			for _, started := range e.agents {

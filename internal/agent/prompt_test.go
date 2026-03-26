@@ -68,6 +68,121 @@ func TestDebateSystemPrompt_ContainsKeyInstructions(t *testing.T) {
 	}
 }
 
+func TestConnectorSystemPrompt_ContainsNames(t *testing.T) {
+	prompt := ConnectorSystemPrompt("claude", "codex", "How should we handle distributed state?", "/usr/local/bin/herd", "debate-123")
+
+	if !strings.Contains(prompt, "claude") {
+		t.Error("prompt should contain agent name 'claude'")
+	}
+	if !strings.Contains(prompt, "codex") {
+		t.Error("prompt should contain critic name 'codex'")
+	}
+}
+
+func TestConnectorSystemPrompt_ContainsToolCommands(t *testing.T) {
+	prompt := ConnectorSystemPrompt("claude", "codex", "test topic", "/usr/local/bin/herd", "debate-abc")
+
+	commands := []struct {
+		fragment    string
+		description string
+	}{
+		{"/usr/local/bin/herd channel post --debate debate-abc --from claude", "should contain post command"},
+		{"/usr/local/bin/herd channel read --debate debate-abc --agent claude", "should contain read command"},
+		{"/usr/local/bin/herd channel wait --debate debate-abc --agent claude", "should contain wait command"},
+		{"/usr/local/bin/herd channel conclude --debate debate-abc --from claude", "should contain conclude command"},
+	}
+
+	for _, tc := range commands {
+		if !strings.Contains(prompt, tc.fragment) {
+			t.Errorf("prompt should contain %q: %s", tc.fragment, tc.description)
+		}
+	}
+}
+
+func TestConnectorSystemPrompt_ContainsConstraints(t *testing.T) {
+	prompt := ConnectorSystemPrompt("claude", "codex", "test topic", "/usr/local/bin/herd", "debate-123")
+
+	constraints := []struct {
+		keyword     string
+		description string
+	}{
+		{"CONNECTOR", "should identify the role"},
+		{"Do NOT use any keywords from the topic", "should prohibit topic-keyword searches"},
+		{"STRUCTURAL PATTERN", "should instruct structural pattern identification"},
+		{"IDENTIFY THE STRUCTURE FIRST", "should require structure-first thinking"},
+		{"STRUCTURAL MAPPING WITH ACTIONABLE IMPLICATIONS", "should require actionable implications"},
+		{"This suggests...", "should require explicit suggestion format"},
+		{"PRIORITIZE SURPRISE", "should push for non-obvious insights"},
+		{"DO NOT CONCLUDE EARLY", "should prevent premature conclusion"},
+		{"at least 4 substantive messages", "should require minimum messages before concluding"},
+	}
+
+	for _, tc := range constraints {
+		if !strings.Contains(prompt, tc.keyword) {
+			t.Errorf("prompt should contain %q: %s", tc.keyword, tc.description)
+		}
+	}
+}
+
+func TestCriticSystemPrompt_ContainsNames(t *testing.T) {
+	prompt := CriticSystemPrompt("codex", "claude", "How should we handle distributed state?", "/usr/local/bin/herd", "debate-123")
+
+	if !strings.Contains(prompt, "codex") {
+		t.Error("prompt should contain agent name 'codex'")
+	}
+	if !strings.Contains(prompt, "claude") {
+		t.Error("prompt should contain connector name 'claude'")
+	}
+}
+
+func TestCriticSystemPrompt_ContainsToolCommands(t *testing.T) {
+	prompt := CriticSystemPrompt("codex", "claude", "test topic", "/usr/local/bin/herd", "debate-abc")
+
+	commands := []struct {
+		fragment    string
+		description string
+	}{
+		{"/usr/local/bin/herd channel post --debate debate-abc --from codex", "should contain post command"},
+		{"/usr/local/bin/herd channel read --debate debate-abc --agent codex", "should contain read command"},
+		{"/usr/local/bin/herd channel wait --debate debate-abc --agent codex", "should contain wait command"},
+		{"/usr/local/bin/herd channel conclude --debate debate-abc --from codex", "should contain conclude command"},
+	}
+
+	for _, tc := range commands {
+		if !strings.Contains(prompt, tc.fragment) {
+			t.Errorf("prompt should contain %q: %s", tc.fragment, tc.description)
+		}
+	}
+}
+
+func TestCriticSystemPrompt_ContainsConstraints(t *testing.T) {
+	prompt := CriticSystemPrompt("codex", "claude", "test topic", "/usr/local/bin/herd", "debate-123")
+
+	constraints := []struct {
+		keyword     string
+		description string
+	}{
+		{"CRITIC", "should identify the role"},
+		{"RESEARCH THE TOPIC DIRECTLY", "should instruct direct research"},
+		{"DO NOT PROPOSE YOUR OWN ANALOGIES", "should prohibit proposing analogies"},
+		{"EXTRACT ACTIONABLE IMPLICATIONS WHEN VALIDATING", "should require actionable extraction"},
+		{"DESIGN WHAT DOESN'T EXIST", "should push toward novel design"},
+		{"DOESN'T EXIST YET", "should not dismiss unproven ideas"},
+		{"minimum viable version", "should push for concrete design sketches"},
+		{"IDENTIFY BLIND SPOTS", "should instruct identifying gaps"},
+		{"PUSH FOR SPECIFICS", "should instruct pushing for specifics"},
+		{"GROUND IN THE DEVELOPER'S CONTEXT", "should push for developer-grounded evaluation"},
+		{"DO NOT CONCLUDE EARLY", "should prevent premature conclusion"},
+		{"HOLDS / PARTIALLY HOLDS / BREAKS", "should require structured verdicts"},
+	}
+
+	for _, tc := range constraints {
+		if !strings.Contains(prompt, tc.keyword) {
+			t.Errorf("prompt should contain %q: %s", tc.keyword, tc.description)
+		}
+	}
+}
+
 func TestNudgeMessage(t *testing.T) {
 	msg := NudgeMessage(3, "/usr/local/bin/herd", "debate-abc", "claude")
 

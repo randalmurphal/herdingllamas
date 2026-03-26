@@ -39,6 +39,15 @@ type Config struct {
 	Store        *store.Store
 	DebateID     string
 	HerdBinary   string // Path to the herd binary (for channel tool commands)
+
+	// SystemPrompt overrides the default prompt generation. When set, used
+	// directly instead of calling DebateSystemPrompt(). This lets the engine
+	// pass mode-specific prompts (e.g., explore mode's Connector/Critic).
+	SystemPrompt string
+
+	// InitialMessage overrides the default first message sent to the session.
+	// When empty, falls back to a generic "begin researching" message.
+	InitialMessage string
 }
 
 // Agent wraps a long-lived LLM session for debate participation.
@@ -106,10 +115,13 @@ func newAgent(cfg Config, session SessionAdapter) *Agent {
 
 // createSession creates the appropriate SessionAdapter based on the provider.
 func createSession(ctx context.Context, cfg Config) (SessionAdapter, error) {
-	systemPrompt := DebateSystemPrompt(
-		cfg.Name, cfg.OpponentName, cfg.Question,
-		cfg.HerdBinary, cfg.DebateID,
-	)
+	systemPrompt := cfg.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = DebateSystemPrompt(
+			cfg.Name, cfg.OpponentName, cfg.Question,
+			cfg.HerdBinary, cfg.DebateID,
+		)
+	}
 
 	switch cfg.Provider {
 	case ProviderClaude:
@@ -180,7 +192,10 @@ func (a *Agent) loop(ctx context.Context) error {
 
 	// Send the initial prompt to kick off the session. The system prompt
 	// with channel tool instructions is already configured on the session.
-	initialMessage := "Begin by researching the question. When you have formed an initial analysis, post it to the debate channel using the channel post command in your system prompt."
+	initialMessage := a.config.InitialMessage
+	if initialMessage == "" {
+		initialMessage = "Begin by researching the question. When you have formed an initial analysis, post it to the debate channel using the channel post command in your system prompt."
+	}
 	if err := a.session.Send(ctx, initialMessage); err != nil {
 		a.logEvent("error", map[string]string{"detail": fmt.Sprintf("sending initial message: %v", err)})
 		return fmt.Errorf("sending initial message: %w", err)
