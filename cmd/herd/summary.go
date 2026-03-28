@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -15,9 +17,21 @@ import (
 	"github.com/randalmurphal/llmkit/claude"
 )
 
+// summaryJSON is the JSON output format for the summary command.
+type summaryJSON struct {
+	DebateID     string   `json:"debate_id"`
+	Question     string   `json:"question"`
+	Status       string   `json:"status"`
+	Participants []string `json:"participants"`
+	TurnCount    int      `json:"turn_count"`
+	Duration     string   `json:"duration"`
+	Summary      string   `json:"summary"`
+}
+
 func summaryCmd() *cobra.Command {
 	var debateID string
 	var latest bool
+	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "summary",
@@ -59,6 +73,9 @@ and answers the original question based on the full discussion.`,
 			if err != nil {
 				return fmt.Errorf("getting debate: %w", err)
 			}
+			if debate == nil {
+				return fmt.Errorf("debate not found: %s", debateID)
+			}
 
 			messages, err := st.GetDebateMessages(debateID)
 			if err != nil {
@@ -71,12 +88,36 @@ and answers the original question based on the full discussion.`,
 			// Build the transcript for the summary agent.
 			transcript := formatTranscript(debate, messages)
 
-			fmt.Fprintf(os.Stderr, "Summarizing debate %s (%d messages)...\n", debateID[:8], len(messages))
+			shortID := debateID
+			if len(shortID) > 8 {
+				shortID = shortID[:8]
+			}
+			fmt.Fprintf(os.Stderr, "Summarizing debate %s (%d messages)...\n", shortID, len(messages))
 
 			// Call Claude to produce the summary.
 			summary, err := generateSummary(ctx, debate, transcript)
 			if err != nil {
 				return fmt.Errorf("generating summary: %w", err)
+			}
+
+			if jsonOutput {
+				participants, turnCount := analyzeMessages(messages)
+				var duration time.Duration
+				if debate.EndedAt != nil {
+					duration = debate.EndedAt.Sub(debate.CreatedAt)
+				}
+				out := summaryJSON{
+					DebateID:     debate.ID,
+					Question:     debate.Question,
+					Status:       debate.Status,
+					Participants: participants,
+					TurnCount:    turnCount,
+					Duration:     formatDuration(duration),
+					Summary:      summary,
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
 			}
 
 			fmt.Println(summary)
@@ -86,6 +127,7 @@ and answers the original question based on the full discussion.`,
 
 	cmd.Flags().StringVar(&debateID, "debate", "", "Debate ID to summarize")
 	cmd.Flags().BoolVar(&latest, "latest", false, "Summarize the most recent session")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output summary as JSON")
 
 	return cmd
 }
@@ -162,4 +204,34 @@ func generateSummary(ctx context.Context, debate *store.Debate, transcript strin
 	}
 
 	return resp.Content, nil
+}
+
+// analyzeMessages extracts unique participants (excluding moderator/system) and
+// counts the number of agent turns.
+func analyzeMessages(messages []store.Message) (participants []string, turnCount int) {
+	seen := make(map[string]bool)
+	for _, msg := range messages {
+		if msg.Author == "system" || msg.Author == "moderator" {
+			continue
+		}
+		if !seen[msg.Author] {
+			seen[msg.Author] = true
+			participants = append(participants, msg.Author)
+		}
+		turnCount++
+	}
+	sort.Strings(participants)
+	return participants, turnCount
+}
+
+// formatDuration formats a duration as MM:SS or HH:MM:SS.
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%02d:%02d", m, s)
 }

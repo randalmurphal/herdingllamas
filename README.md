@@ -30,6 +30,12 @@ herd debate "Is TDD actually worth the overhead for small teams?"
 herd debate "Monorepo vs polyrepo for a 15-person startup" --models claude,codex --max-turns 12
 ```
 
+For scripting or CI pipelines, `--json` runs headless (no TUI) and writes structured JSON to stdout:
+
+```
+herd debate "Should we migrate to gRPC?" --json --max-turns 8 > result.json
+```
+
 ### Explore
 
 The weirder, more interesting mode. Two agents with intentionally asymmetric roles:
@@ -45,11 +51,14 @@ herd explore "How should we approach real-time collaboration in our editor?"
 
 ### Summary
 
-After a session finishes, feed the transcript to a fresh Claude instance for an evaluated synthesis. It reads the full debate, picks out what actually matters, and gives you a structured answer.
+Debates and explorations automatically generate a summary when they finish. To skip this, pass `--no-summary`.
+
+You can also generate a summary for any past session:
 
 ```
 herd summary --latest
 herd summary --debate abc123
+herd summary --latest --json
 ```
 
 Output includes: direct answer, key findings, open questions, and the strongest evidence from the discussion.
@@ -99,6 +108,8 @@ Everything persists to `~/.herdingllamas/debates.db`, so you can summarize old s
 | `--max-turns` | `0` (unlimited) | Stop after N turns |
 | `--max-duration` | `0` (unlimited) | Stop after duration (e.g. `30m`) |
 | `--workdir` | `.` | Working directory for agent sessions |
+| `--json` | `false` | Output results as JSON to stdout (no TUI) |
+| `--no-summary` | `false` | Skip automatic summary after debate ends |
 
 ### `herd explore [topic]`
 
@@ -110,6 +121,7 @@ Same flags as `debate`. First model becomes the Connector, second becomes the Cr
 |------|---------|-------------|
 | `--debate` | | Specific debate ID |
 | `--latest` | `false` | Summarize most recent session |
+| `--json` | `false` | Output summary as JSON |
 
 ### `herd channel <subcommand>`
 

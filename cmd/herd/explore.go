@@ -19,6 +19,8 @@ func exploreCmd() *cobra.Command {
 	var maxTurns int
 	var maxDuration time.Duration
 	var workDir string
+	var jsonOutput bool
+	var noSummary bool
 
 	cmd := &cobra.Command{
 		Use:   "explore [topic]",
@@ -49,18 +51,29 @@ and different cognitive tasks.`,
 				MaxDuration: maxDuration,
 			}
 
-			fmt.Println("Creating explore session...")
+			if !jsonOutput {
+				fmt.Println("Creating explore session...")
+			}
 			engine, err := debate.New(cfg)
 			if err != nil {
 				return fmt.Errorf("create explore engine: %w", err)
 			}
 
-			fmt.Printf("Starting agents: %s (Connector) + %s (Critic)\n", models[0], models[1])
-			fmt.Println("(This may take a moment while sessions initialize. Ctrl+C to abort.)")
+			if !jsonOutput {
+				fmt.Printf("Starting agents: %s (Connector) + %s (Critic)\n", models[0], models[1])
+				fmt.Println("(This may take a moment while sessions initialize. Ctrl+C to abort.)")
+			}
 			events, err := engine.Start(ctx)
 			if err != nil {
 				engine.Stop()
 				return fmt.Errorf("start explore: %w", err)
+			}
+
+			if jsonOutput {
+				for range events {
+				}
+				engine.Stop()
+				return outputDebateJSON(ctx, engine.DebateID(), models, !noSummary)
 			}
 
 			fmt.Println("Agents ready. Launching TUI...")
@@ -74,6 +87,11 @@ and different cognitive tasks.`,
 			engine.Stop()
 
 			fmt.Printf("\nExploration %s saved to database.\n", engine.DebateID())
+
+			if !noSummary {
+				printDebateSummary(ctx, engine.DebateID())
+			}
+
 			return nil
 		},
 	}
@@ -82,6 +100,8 @@ and different cognitive tasks.`,
 	cmd.Flags().IntVar(&maxTurns, "max-turns", 0, "Maximum turns (0=unlimited)")
 	cmd.Flags().DurationVar(&maxDuration, "max-duration", 0, "Maximum duration (0=unlimited)")
 	cmd.Flags().StringVar(&workDir, "workdir", ".", "Working directory for agent sessions")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON (no TUI)")
+	cmd.Flags().BoolVar(&noSummary, "no-summary", false, "Skip automatic summary after session ends")
 
 	return cmd
 }
