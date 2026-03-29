@@ -188,7 +188,6 @@ Rules:
 func generateSummary(ctx context.Context, debate *store.Debate, transcript string) (string, error) {
 	client := claude.NewClaudeCLI(
 		claude.WithDangerouslySkipPermissions(),
-		claude.WithMaxTurns(1),
 	)
 
 	userMessage := fmt.Sprintf("Here is the full transcript of a multi-agent session. Read it carefully and produce your evaluated summary.\n\n%s", transcript)
