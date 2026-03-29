@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/randalmurphal/herdingllamas/internal/debate"
 	"github.com/randalmurphal/herdingllamas/internal/store"
 	"github.com/randalmurphal/llmkit/claude"
 )
@@ -94,8 +95,9 @@ and answers the original question based on the full discussion.`,
 			}
 			fmt.Fprintf(os.Stderr, "Summarizing debate %s (%d messages)...\n", shortID, len(messages))
 
-			// Call Claude to produce the summary.
-			summary, err := generateSummary(ctx, debate, transcript)
+			// Call Claude to produce the summary, using the mode-appropriate prompt.
+			mode := extractMode(debate)
+			summary, err := generateSummary(ctx, debate, transcript, mode)
 			if err != nil {
 				return fmt.Errorf("generating summary: %w", err)
 			}
@@ -184,16 +186,57 @@ Rules:
 - If both agents missed something obvious, point it out.
 - Don't pad. If the discussion was thin, say so.`
 
+const interrogationSummarySystemPrompt = `You are synthesizing an Advocate/Interrogator plan interrogation transcript into a structured plan review.
+
+Your job is to extract the findings from the session and organize them into a deliverable a developer can act on immediately. You are not adding your own analysis — the agents had full tool access, read the code, and did the research. You are structuring their findings clearly and completely so nothing gets lost in the conversation format.
+
+Structure your response as:
+
+## Plan Assessment
+A direct verdict on the plan's readiness for implementation based on what the session found. 2-3 paragraphs covering: is this plan ready to build? What's the overall quality? What's the single biggest risk that was identified?
+
+## Confirmed Strengths
+Design decisions that were challenged during interrogation and held up with evidence. Include the evidence — the developer needs to know these are validated, not just unchallenged.
+
+## Identified Gaps
+Every gap surfaced during the session. For each gap:
+- **What**: The specific problem
+- **Evidence**: How it was discovered (code reference, research finding, traced data path)
+- **Severity**: Blocker (must fix before implementation), Risk (must address during implementation), or Improvement (would strengthen the plan)
+- **Recommended fix**: How the plan should be amended (use the agents' proposed fixes where they exist)
+
+Order by severity — blockers first. Include gaps the Advocate proactively surfaced, gaps the Interrogator found, and any points the Interrogator raised that the Advocate couldn't adequately defend — even if not explicitly confirmed as gaps.
+
+## Uncovered Dimensions
+If any dimensions from the interrogation checklist were not adequately explored, list them here. Absence of investigation is not the same as absence of problems.
+
+## Implementation Recommendations
+Based on everything surfaced, what should the developer do next? Prioritized, specific, actionable. Drawn from the session's findings, not generic advice.
+
+Rules:
+- The developer needs to know what to FIX, not what was DISCUSSED.
+- If the Advocate confirmed a gap, that's the highest-confidence signal — lead with those.
+- If the Advocate proactively surfaced a concern in their opening analysis, that's high-signal — they found it during their deepest read.
+- Be complete. Comb the full transcript — findings often emerge mid-exchange and are easy to miss in the back-and-forth.
+- If the interrogation was shallow on any dimension, say so — a clean bill of health from a shallow review is worse than no review.
+- Don't pad. If the plan is solid, say so briefly. If it's full of gaps, be thorough.`
+
 // generateSummary calls Claude to produce an evaluated summary of the debate.
-func generateSummary(ctx context.Context, debate *store.Debate, transcript string) (string, error) {
+// The system prompt varies by mode to produce the most useful output format.
+func generateSummary(ctx context.Context, d *store.Debate, transcript string, mode debate.Mode) (string, error) {
 	client := claude.NewClaudeCLI(
 		claude.WithDangerouslySkipPermissions(),
 	)
 
+	sysPrompt := summarySystemPrompt
+	if mode == debate.ModeInterrogate {
+		sysPrompt = interrogationSummarySystemPrompt
+	}
+
 	userMessage := fmt.Sprintf("Here is the full transcript of a multi-agent session. Read it carefully and produce your evaluated summary.\n\n%s", transcript)
 
 	resp, err := client.Complete(ctx, claude.CompletionRequest{
-		SystemPrompt: summarySystemPrompt,
+		SystemPrompt: sysPrompt,
 		Messages: []claude.Message{
 			{Role: claude.RoleUser, Content: userMessage},
 		},
@@ -203,6 +246,24 @@ func generateSummary(ctx context.Context, debate *store.Debate, transcript strin
 	}
 
 	return resp.Content, nil
+}
+
+// extractMode parses the debate mode from the stored config JSON.
+// Returns ModeDebate as a default if the config can't be parsed.
+func extractMode(d *store.Debate) debate.Mode {
+	if d.Config == "" {
+		return debate.ModeDebate
+	}
+	var cfg struct {
+		Mode debate.Mode `json:"Mode"`
+	}
+	if err := json.Unmarshal([]byte(d.Config), &cfg); err != nil {
+		return debate.ModeDebate
+	}
+	if cfg.Mode == "" {
+		return debate.ModeDebate
+	}
+	return cfg.Mode
 }
 
 // analyzeMessages extracts unique participants (excluding moderator/system) and

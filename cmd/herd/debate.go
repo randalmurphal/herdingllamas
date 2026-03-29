@@ -167,7 +167,8 @@ func outputDebateJSON(ctx context.Context, debateID string, models []string, inc
 
 	if includeSummary {
 		transcript := formatTranscript(d, messages)
-		summary, err := generateSummary(ctx, d, transcript)
+		mode := extractMode(d)
+		summary, err := generateSummary(ctx, d, transcript, mode)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to generate summary: %v\n", err)
 		} else {
@@ -216,7 +217,8 @@ func printDebateSummary(ctx context.Context, debateID string) {
 
 	fmt.Fprintf(os.Stderr, "\nGenerating summary...\n")
 	transcript := formatTranscript(d, messages)
-	summary, err := generateSummary(ctx, d, transcript)
+	mode := extractMode(d)
+	summary, err := generateSummary(ctx, d, transcript, mode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not generate summary: %v\n", err)
 		return

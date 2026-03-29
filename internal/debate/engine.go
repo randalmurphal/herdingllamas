@@ -152,6 +152,12 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 			e.config.Question,
 		)
 	}
+	if e.config.Mode == ModeInterrogate {
+		openingMsg = fmt.Sprintf(
+			"PLAN INTERROGATION: %s\n\nAdvocate: build the strongest evidence-based defense of this plan. Interrogator: systematically probe every dimension for gaps.",
+			e.config.Question,
+		)
+	}
 	_, err := e.store.PostMessage(e.debateID, "moderator", openingMsg)
 	if err != nil {
 		cancel()
@@ -218,6 +224,24 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 					e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.CriticInitialMessage
+			}
+		}
+
+		// In interrogate mode, the first model is the Advocate (plan
+		// defender) and the second is the Interrogator (gap finder).
+		if e.config.Mode == ModeInterrogate {
+			if i == 0 {
+				agentCfg.SystemPrompt = agent.AdvocateSystemPrompt(
+					model, opponentFor(i), e.config.Question,
+					e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.AdvocateInitialMessage
+			} else {
+				agentCfg.SystemPrompt = agent.InterrogatorSystemPrompt(
+					model, opponentFor(i), e.config.Question,
+					e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.InterrogatorInitialMessage
 			}
 		}
 

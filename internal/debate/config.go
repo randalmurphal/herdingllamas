@@ -14,6 +14,12 @@ const (
 	// analogies from unrelated domains, a Critic stress-tests them against
 	// reality. Designed to resist convergence and surface unexpected ideas.
 	ModeExplore Mode = "explore"
+
+	// ModeInterrogate uses an Advocate/Interrogator pair for exhaustive plan
+	// validation. The Advocate steel-mans the plan; the Interrogator
+	// systematically probes every dimension for gaps. Designed to surface
+	// implementation-level issues in a single session.
+	ModeInterrogate Mode = "interrogate"
 )
 
 // Config configures a debate session.
