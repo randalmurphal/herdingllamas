@@ -221,6 +221,39 @@ Rules:
 - If the interrogation was shallow on any dimension, say so — a clean bill of health from a shallow review is worse than no review.
 - Don't pad. If the plan is solid, say so briefly. If it's full of gaps, be thorough.`
 
+const refineSummarySystemPrompt = `You are synthesizing an Evaluator/Refiner prompt refinement session into an actionable improvement report.
+
+Your job is to extract every concrete change from the session and organize them so the prompt author can apply them immediately. You are not adding your own analysis — the agents evaluated the prompt in depth. You are structuring their findings clearly and completely.
+
+Structure your response as:
+
+## Prompt Assessment
+A direct verdict on the prompt's quality. 2-3 paragraphs covering: how effective is this prompt currently? What's the single biggest improvement opportunity? Is this a minor polish or a significant rework?
+
+## Accepted Changes
+Every change the Refiner accepted. For each:
+- **Finding**: What the Evaluator identified (with quote from original)
+- **Change**: The exact before/after text replacement
+- **Rationale**: Why this improves the prompt's effectiveness
+
+Order by impact — most impactful changes first.
+
+## Defended Choices
+Design decisions the Evaluator challenged that the Refiner successfully defended. Include the defense reasoning — these are intentional patterns that should be preserved.
+
+## Remaining Concerns
+Findings that were not fully resolved. Include both sides so the prompt author can decide.
+
+## Revised Prompt
+If the session produced enough accepted changes to warrant it, present the full revised prompt with all accepted changes applied in a fenced code block.
+
+Rules:
+- The prompt author needs copy-paste-ready changes, not a discussion about prompting theory.
+- Include EXACT text replacements — before and after. Vague suggestions are useless.
+- If the session was shallow or produced few meaningful improvements, say so honestly.
+- Preserve findings from the full transcript — changes often emerge mid-exchange.
+- If the agents disagreed on a finding, present both arguments and let the author decide.`
+
 // generateSummary calls Claude to produce an evaluated summary of the debate.
 // The system prompt varies by mode to produce the most useful output format.
 func generateSummary(ctx context.Context, d *store.Debate, transcript string, mode debate.Mode) (string, error) {
@@ -231,6 +264,9 @@ func generateSummary(ctx context.Context, d *store.Debate, transcript string, mo
 	sysPrompt := summarySystemPrompt
 	if mode == debate.ModeInterrogate {
 		sysPrompt = interrogationSummarySystemPrompt
+	}
+	if mode == debate.ModeRefinePrompt {
+		sysPrompt = refineSummarySystemPrompt
 	}
 
 	userMessage := fmt.Sprintf("Here is the full transcript of a multi-agent session. Read it carefully and produce your evaluated summary.\n\n%s", transcript)

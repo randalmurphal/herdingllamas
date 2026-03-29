@@ -26,6 +26,12 @@ const (
 	// systematically probes every dimension for gaps. Designed to surface
 	// implementation-level issues in a single session.
 	ModeInterrogate Mode = "interrogate"
+
+	// ModeRefinePrompt uses an Evaluator/Refiner pair to systematically
+	// assess and improve a prompt. The Evaluator checks against prompt
+	// engineering principles; the Refiner defends intentional choices and
+	// proposes concrete text replacements.
+	ModeRefinePrompt Mode = "refine-prompt"
 )
 
 // Config configures a debate session.
@@ -37,6 +43,7 @@ type Config struct {
 	MaxTurns    int           // 0 = unlimited
 	MaxDuration time.Duration // 0 = unlimited
 	DBPath      string        // SQLite database path (empty = default)
+	TargetModel string        // Target model for refine-prompt mode
 
 	// Per-provider model and effort overrides. Keyed by provider name.
 	// When empty, the provider's CLI default is used.
@@ -76,6 +83,8 @@ func RoleNames(mode Mode) (string, string) {
 		return "connector", "critic"
 	case ModeInterrogate:
 		return "advocate", "interrogator"
+	case ModeRefinePrompt:
+		return "evaluator", "refiner"
 	default:
 		return "proponent", "opponent"
 	}

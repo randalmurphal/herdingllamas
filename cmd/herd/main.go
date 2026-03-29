@@ -19,6 +19,7 @@ func main() {
 	root.AddCommand(interrogateCmd())
 	root.AddCommand(summaryCmd())
 	root.AddCommand(channelCmd())
+	root.AddCommand(refinePromptCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

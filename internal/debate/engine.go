@@ -165,6 +165,9 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 			e.config.Question,
 		)
 	}
+	if e.config.Mode == ModeRefinePrompt {
+		openingMsg = "PROMPT REFINEMENT SESSION\n\nThe prompt under review is in your system instructions. Evaluator: systematically assess it against the evaluation checklist. Refiner: defend intentional choices and propose concrete improvements for valid findings."
+	}
 	_, err := e.store.PostMessage(e.debateID, "moderator", openingMsg)
 	if err != nil {
 		cancel()
@@ -244,6 +247,24 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 					e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.InterrogatorInitialMessage
+			}
+		}
+
+		// In refine-prompt mode, the first agent is the Evaluator
+		// (prompt assessor) and the second is the Refiner (defender/editor).
+		if e.config.Mode == ModeRefinePrompt {
+			if i == 0 {
+				agentCfg.SystemPrompt = agent.EvaluatorSystemPrompt(
+					meta[i].Role, opponentRole, e.config.Question,
+					e.config.TargetModel, e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.EvaluatorInitialMessage
+			} else {
+				agentCfg.SystemPrompt = agent.RefinerSystemPrompt(
+					meta[i].Role, opponentRole, e.config.Question,
+					e.config.TargetModel, e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.RefinerInitialMessage
 			}
 		}
 

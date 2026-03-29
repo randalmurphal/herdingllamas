@@ -107,13 +107,13 @@ func TestConnectorSystemPrompt_ContainsConstraints(t *testing.T) {
 		description string
 	}{
 		{"CONNECTOR", "should identify the role"},
-		{"Do NOT use any keywords from the topic", "should prohibit topic-keyword searches"},
+		{"never use keywords from the topic itself", "should prohibit topic-keyword searches"},
 		{"STRUCTURAL PATTERN", "should instruct structural pattern identification"},
 		{"IDENTIFY THE STRUCTURE FIRST", "should require structure-first thinking"},
 		{"STRUCTURAL MAPPING WITH ACTIONABLE IMPLICATIONS", "should require actionable implications"},
 		{"This suggests...", "should require explicit suggestion format"},
 		{"PRIORITIZE SURPRISE", "should push for non-obvious insights"},
-		{"DO NOT CONCLUDE EARLY", "should prevent premature conclusion"},
+		{"CONCLUDE ONLY AFTER SUBSTANCE", "should prevent premature conclusion"},
 		{"at least 4 substantive messages", "should require minimum messages before concluding"},
 	}
 
@@ -164,7 +164,7 @@ func TestCriticSystemPrompt_ContainsConstraints(t *testing.T) {
 	}{
 		{"CRITIC", "should identify the role"},
 		{"RESEARCH THE TOPIC DIRECTLY", "should instruct direct research"},
-		{"DO NOT PROPOSE YOUR OWN ANALOGIES", "should prohibit proposing analogies"},
+		{"FOCUS ON EVALUATION AND DESIGN", "should keep role separation with Connector"},
 		{"EXTRACT ACTIONABLE IMPLICATIONS WHEN VALIDATING", "should require actionable extraction"},
 		{"DESIGN WHAT DOESN'T EXIST", "should push toward novel design"},
 		{"DOESN'T EXIST YET", "should not dismiss unproven ideas"},
@@ -172,7 +172,7 @@ func TestCriticSystemPrompt_ContainsConstraints(t *testing.T) {
 		{"IDENTIFY BLIND SPOTS", "should instruct identifying gaps"},
 		{"PUSH FOR SPECIFICS", "should instruct pushing for specifics"},
 		{"GROUND IN THE DEVELOPER'S CONTEXT", "should push for developer-grounded evaluation"},
-		{"DO NOT CONCLUDE EARLY", "should prevent premature conclusion"},
+		{"CONCLUDE ONLY AFTER NOVELTY", "should prevent premature conclusion"},
 		{"HOLDS / PARTIALLY HOLDS / BREAKS", "should require structured verdicts"},
 	}
 

@@ -74,9 +74,30 @@ The asymmetry is the point. Same-role agents converge too quickly. Different inf
 herd explore "How should we approach real-time collaboration in our editor?"
 ```
 
+### Refine Prompt
+
+Systematic prompt improvement. Use this when you have a system prompt, agent instruction, or any prompt you want evaluated against prompt engineering principles and improved with concrete, copy-paste-ready changes.
+
+Two agents with asymmetric roles:
+
+- **Evaluator** (first model): Systematically assesses the prompt against a 10-dimension checklist — clarity, specificity, structure, instruction framing (positive vs. negative), role definition, context efficiency, constraint completeness, technique fit, redundancy/contradiction, and rationale/motivation. Every finding quotes the exact text and rates severity (HIGH/MEDIUM/LOW).
+- **Refiner** (second model): Defends intentional design choices against pedantic or theoretical evaluations, and proposes exact before/after text replacements for valid findings. Pushes back on over-engineering — the goal is the minimum effective prompt, not the maximum possible prompt.
+
+```
+herd refine-prompt ./prompts/my-system-prompt.txt --target claude
+```
+
+```
+herd refine-prompt "You are a senior code reviewer..." --target gpt-5 --max-turns 10
+```
+
+The argument can be a file path (the file contents are read automatically) or literal prompt text. Use `--target` to specify which model the prompt is designed for, so the evaluator can apply model-specific criteria.
+
+The summary output is structured as: prompt assessment, accepted changes (with exact before/after text), defended choices, remaining concerns, and a revised prompt with all accepted changes applied.
+
 ### Summary
 
-All modes automatically generate a summary when they finish. The summary format adapts to the mode — debate summaries synthesize the answer, interrogation summaries produce a structured plan assessment, and explore summaries extract actionable implications. To skip this, pass `--no-summary`.
+All modes automatically generate a summary when they finish. The summary format adapts to the mode — debate summaries synthesize the answer, interrogation summaries produce a structured plan assessment, explore summaries extract actionable implications, and refine-prompt summaries produce copy-paste-ready improvements. To skip this, pass `--no-summary`.
 
 You can also generate a summary for any past session:
 
@@ -142,6 +163,16 @@ Same flags as `debate`. First model becomes the Advocate, second becomes the Int
 
 Same flags as `debate`. First model becomes the Connector, second becomes the Critic.
 
+### `herd refine-prompt [prompt text or file path]`
+
+Same flags as `debate`, plus:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--target` | | Target model the prompt is designed for (e.g. `claude`, `gpt-5`, `gemini`) |
+
+First model becomes the Evaluator, second becomes the Refiner. The argument is read as a file path if the file exists, otherwise treated as literal prompt text.
+
 ### `herd summary`
 
 | Flag | Default | Description |
@@ -170,7 +201,7 @@ The header shows status (LIVE/ENDED), active agent count, message count, and ela
 ## Project Structure
 
 ```
-cmd/herd/          CLI commands (debate, interrogate, explore, summary, channel)
+cmd/herd/          CLI commands (debate, interrogate, explore, refine-prompt, summary, channel)
 internal/agent/    Agent lifecycle, session adapters, system prompts
 internal/debate/   Engine orchestration, config, stop hooks
 internal/store/    SQLite persistence (messages, cursors, conclusions)
