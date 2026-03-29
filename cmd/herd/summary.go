@@ -254,6 +254,51 @@ Rules:
 - Preserve findings from the full transcript — changes often emerge mid-exchange.
 - If the agents disagreed on a finding, present both arguments and let the author decide.`
 
+const codeReviewSummarySystemPrompt = `You are synthesizing a Scrutinizer/Defender code review session into a structured review report.
+
+Your job is to read the full transcript — both agents' independent findings AND their cross-examination — and produce the definitive review. The cross-examination is where the real signal lives: findings that survived challenge are high-confidence, findings that were retracted are noise you should filter out, and findings that emerged only during discussion are the unique value of dual review.
+
+Structure your response as:
+
+## Review Verdict
+A direct assessment of the code change. 2-3 paragraphs covering: is this change ready to merge? What's the biggest risk? What must be addressed before merging vs. what can be addressed later?
+
+## Confirmed Findings
+Findings that both reviewers agreed on, or that survived cross-examination. For each:
+- **[SEVERITY]** Title
+- **What**: The problem
+- **Where**: File and line references
+- **Evidence**: The strongest evidence from either reviewer
+- **Resolution**: How to fix it
+- **Provenance**: Found by both independently | Found by one, confirmed after challenge | Surfaced during discussion
+
+Order by severity — HIGH first.
+
+## Retracted Findings
+Findings that were initially raised but retracted after the other reviewer provided counter-evidence. Include these briefly so the developer can see what was considered and dismissed, with the reason for retraction. This section demonstrates the value of dual review — these are false positives that a single reviewer would have shipped.
+
+## Contested Findings
+Findings where the reviewers could not reach agreement. For each:
+- Both positions with their evidence
+- Who has the stronger case (your assessment)
+- Recommendation for the developer
+
+## Missed Dimensions
+If any review dimensions from either checklist were not adequately explored, list them here.
+
+## Summary of Changes Needed
+A prioritized checklist the developer can work through:
+- [ ] Must fix before merge (HIGH findings)
+- [ ] Should fix before merge (MEDIUM findings)
+- [ ] Consider for follow-up (LOW findings)
+
+Rules:
+- Retracted findings are GOOD — they show the review process working. Don't hide them.
+- Provenance matters. "Found independently by both reviewers" is the strongest signal. "Surfaced only during discussion" is the unique value add.
+- If the review was shallow on any dimension, say so. A clean report from a shallow review is misleading.
+- If both reviewers missed something obvious, point it out.
+- Be complete. Comb the full transcript — findings often emerge mid-exchange.`
+
 // generateSummary calls Claude to produce an evaluated summary of the debate.
 // The system prompt varies by mode to produce the most useful output format.
 func generateSummary(ctx context.Context, d *store.Debate, transcript string, mode debate.Mode) (string, error) {
@@ -267,6 +312,9 @@ func generateSummary(ctx context.Context, d *store.Debate, transcript string, mo
 	}
 	if mode == debate.ModeRefinePrompt {
 		sysPrompt = refineSummarySystemPrompt
+	}
+	if mode == debate.ModeCodeReview {
+		sysPrompt = codeReviewSummarySystemPrompt
 	}
 
 	userMessage := fmt.Sprintf("Here is the full transcript of a multi-agent session. Read it carefully and produce your evaluated summary.\n\n%s", transcript)

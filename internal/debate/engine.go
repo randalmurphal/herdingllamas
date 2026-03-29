@@ -168,6 +168,9 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 	if e.config.Mode == ModeRefinePrompt {
 		openingMsg = "PROMPT REFINEMENT SESSION\n\nThe prompt under review is in your system instructions. Evaluator: systematically assess it against the evaluation checklist. Refiner: defend intentional choices and propose concrete improvements for valid findings."
 	}
+	if e.config.Mode == ModeCodeReview {
+		openingMsg = "CODE REVIEW SESSION\n\nThe diff under review is in your system instructions. Scrutinizer: review from the diff outward for correctness, safety, and edge cases. Defender: review from the system inward for architecture, intent, and integration. Post your independent findings first, then challenge each other's."
+	}
 	_, err := e.store.PostMessage(e.debateID, "moderator", openingMsg)
 	if err != nil {
 		cancel()
@@ -265,6 +268,25 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 					e.config.TargetModel, e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.RefinerInitialMessage
+			}
+		}
+
+		// In code-review mode, the first agent is the Scrutinizer
+		// (diff-outward correctness reviewer) and the second is the
+		// Defender (system-inward architecture reviewer).
+		if e.config.Mode == ModeCodeReview {
+			if i == 0 {
+				agentCfg.SystemPrompt = agent.ScrutinizerSystemPrompt(
+					meta[i].Role, opponentRole, e.config.Question,
+					e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.ScrutinizerInitialMessage
+			} else {
+				agentCfg.SystemPrompt = agent.DefenderSystemPrompt(
+					meta[i].Role, opponentRole, e.config.Question,
+					e.herdBinary, e.debateID,
+				)
+				agentCfg.InitialMessage = agent.DefenderInitialMessage
 			}
 		}
 

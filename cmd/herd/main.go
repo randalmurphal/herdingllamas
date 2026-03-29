@@ -17,6 +17,7 @@ func main() {
 	root.AddCommand(debateCmd())
 	root.AddCommand(exploreCmd())
 	root.AddCommand(interrogateCmd())
+	root.AddCommand(codeReviewCmd())
 	root.AddCommand(summaryCmd())
 	root.AddCommand(channelCmd())
 	root.AddCommand(refinePromptCmd())

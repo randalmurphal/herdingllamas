@@ -32,6 +32,14 @@ const (
 	// engineering principles; the Refiner defends intentional choices and
 	// proposes concrete text replacements.
 	ModeRefinePrompt Mode = "refine-prompt"
+
+	// ModeCodeReview uses a Scrutinizer/Defender pair to review code
+	// changes from two deliberately different angles. The Scrutinizer
+	// works from the diff outward (correctness, safety, edge cases); the
+	// Defender works from the system inward (architecture, intent,
+	// integration). Each challenges the other's findings to filter false
+	// positives and calibrate severity before converging.
+	ModeCodeReview Mode = "code-review"
 )
 
 // Config configures a debate session.
@@ -85,6 +93,8 @@ func RoleNames(mode Mode) (string, string) {
 		return "advocate", "interrogator"
 	case ModeRefinePrompt:
 		return "evaluator", "refiner"
+	case ModeCodeReview:
+		return "scrutinizer", "defender"
 	default:
 		return "proponent", "opponent"
 	}
