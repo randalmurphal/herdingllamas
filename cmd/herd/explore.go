@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -15,12 +14,7 @@ import (
 )
 
 func exploreCmd() *cobra.Command {
-	var models []string
-	var maxTurns int
-	var maxDuration time.Duration
-	var workDir string
-	var jsonOutput bool
-	var noSummary bool
+	var flags commonFlags
 
 	cmd := &cobra.Command{
 		Use:   "explore [topic]",
@@ -42,25 +36,32 @@ and different cognitive tasks.`,
 
 			topic := args[0]
 
-			cfg := debate.Config{
-				Question:    topic,
-				Models:      models,
-				Mode:        debate.ModeExplore,
-				WorkDir:     workDir,
-				MaxTurns:    maxTurns,
-				MaxDuration: maxDuration,
+			rc, err := resolveFromFlags(ctx, cmd, flags, debate.ModeExplore)
+			if err != nil {
+				return err
 			}
 
-			if !jsonOutput {
+			cfg := debate.Config{
+				Question:        topic,
+				Models:          rc.Models,
+				Mode:            debate.ModeExplore,
+				WorkDir:         flags.workDir,
+				MaxTurns:        flags.maxTurns,
+				MaxDuration:     flags.maxDuration,
+				ModelOverrides:  rc.ModelOverrides,
+				EffortOverrides: rc.EffortOverrides,
+			}
+
+			if !flags.jsonOutput {
 				fmt.Println("Creating explore session...")
 			}
-			engine, err := debate.New(cfg)
+			engine, err := debate.New(cfg, rc.AgentMeta)
 			if err != nil {
 				return fmt.Errorf("create explore engine: %w", err)
 			}
 
-			if !jsonOutput {
-				fmt.Printf("Starting agents: %s (Connector) + %s (Critic)\n", models[0], models[1])
+			if !flags.jsonOutput {
+				printAgentTable(rc.AgentMeta)
 				fmt.Println("(This may take a moment while sessions initialize. Ctrl+C to abort.)")
 			}
 			events, err := engine.Start(ctx)
@@ -69,15 +70,16 @@ and different cognitive tasks.`,
 				return fmt.Errorf("start explore: %w", err)
 			}
 
-			if jsonOutput {
+			if flags.jsonOutput {
 				for range events {
 				}
 				engine.Stop()
-				return outputDebateJSON(ctx, engine.DebateID(), models, !noSummary)
+				return outputDebateJSON(ctx, engine.DebateID(), rc.AgentMeta, !flags.noSummary)
 			}
 
 			fmt.Println("Agents ready. Launching TUI...")
-			m := tui.New(engine, events, topic)
+			providers := agentMetaToProviders(rc.AgentMeta)
+			m := tui.New(engine, events, topic, providers, agentMetaOrder(rc.AgentMeta))
 			p := tea.NewProgram(m, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
 				engine.Stop()
@@ -85,10 +87,9 @@ and different cognitive tasks.`,
 			}
 
 			engine.Stop()
-
 			fmt.Printf("\nExploration %s saved to database.\n", engine.DebateID())
 
-			if !noSummary {
+			if !flags.noSummary {
 				printDebateSummary(ctx, engine.DebateID())
 			}
 
@@ -96,12 +97,6 @@ and different cognitive tasks.`,
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&models, "models", []string{"claude", "codex"}, "Models to use (first=Connector, second=Critic)")
-	cmd.Flags().IntVar(&maxTurns, "max-turns", 0, "Maximum turns (0=unlimited)")
-	cmd.Flags().DurationVar(&maxDuration, "max-duration", 0, "Maximum duration (0=unlimited)")
-	cmd.Flags().StringVar(&workDir, "workdir", ".", "Working directory for agent sessions")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON (no TUI)")
-	cmd.Flags().BoolVar(&noSummary, "no-summary", false, "Skip automatic summary after session ends")
-
+	registerCommonFlags(cmd, &flags)
 	return cmd
 }

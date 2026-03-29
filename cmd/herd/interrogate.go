@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -15,12 +14,7 @@ import (
 )
 
 func interrogateCmd() *cobra.Command {
-	var models []string
-	var maxTurns int
-	var maxDuration time.Duration
-	var workDir string
-	var jsonOutput bool
-	var noSummary bool
+	var flags commonFlags
 
 	cmd := &cobra.Command{
 		Use:   "interrogate [plan description or question]",
@@ -45,25 +39,32 @@ to surface implementation-level gaps in a single session.`,
 
 			question := args[0]
 
-			cfg := debate.Config{
-				Question:    question,
-				Models:      models,
-				Mode:        debate.ModeInterrogate,
-				WorkDir:     workDir,
-				MaxTurns:    maxTurns,
-				MaxDuration: maxDuration,
+			rc, err := resolveFromFlags(ctx, cmd, flags, debate.ModeInterrogate)
+			if err != nil {
+				return err
 			}
 
-			if !jsonOutput {
+			cfg := debate.Config{
+				Question:        question,
+				Models:          rc.Models,
+				Mode:            debate.ModeInterrogate,
+				WorkDir:         flags.workDir,
+				MaxTurns:        flags.maxTurns,
+				MaxDuration:     flags.maxDuration,
+				ModelOverrides:  rc.ModelOverrides,
+				EffortOverrides: rc.EffortOverrides,
+			}
+
+			if !flags.jsonOutput {
 				fmt.Println("Creating interrogation session...")
 			}
-			engine, err := debate.New(cfg)
+			engine, err := debate.New(cfg, rc.AgentMeta)
 			if err != nil {
 				return fmt.Errorf("create interrogation engine: %w", err)
 			}
 
-			if !jsonOutput {
-				fmt.Printf("Starting agents: %s (Advocate) + %s (Interrogator)\n", models[0], models[1])
+			if !flags.jsonOutput {
+				printAgentTable(rc.AgentMeta)
 				fmt.Println("(This may take a moment while sessions initialize. Ctrl+C to abort.)")
 			}
 			events, err := engine.Start(ctx)
@@ -72,15 +73,16 @@ to surface implementation-level gaps in a single session.`,
 				return fmt.Errorf("start interrogation: %w", err)
 			}
 
-			if jsonOutput {
+			if flags.jsonOutput {
 				for range events {
 				}
 				engine.Stop()
-				return outputDebateJSON(ctx, engine.DebateID(), models, !noSummary)
+				return outputDebateJSON(ctx, engine.DebateID(), rc.AgentMeta, !flags.noSummary)
 			}
 
 			fmt.Println("Agents ready. Launching TUI...")
-			m := tui.New(engine, events, question)
+			providers := agentMetaToProviders(rc.AgentMeta)
+			m := tui.New(engine, events, question, providers, agentMetaOrder(rc.AgentMeta))
 			p := tea.NewProgram(m, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
 				engine.Stop()
@@ -88,10 +90,9 @@ to surface implementation-level gaps in a single session.`,
 			}
 
 			engine.Stop()
-
 			fmt.Printf("\nInterrogation %s saved to database.\n", engine.DebateID())
 
-			if !noSummary {
+			if !flags.noSummary {
 				printDebateSummary(ctx, engine.DebateID())
 			}
 
@@ -99,12 +100,6 @@ to surface implementation-level gaps in a single session.`,
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&models, "models", []string{"claude", "codex"}, "Models to use (first=Advocate, second=Interrogator)")
-	cmd.Flags().IntVar(&maxTurns, "max-turns", 0, "Maximum turns (0=unlimited)")
-	cmd.Flags().DurationVar(&maxDuration, "max-duration", 0, "Maximum duration (0=unlimited)")
-	cmd.Flags().StringVar(&workDir, "workdir", ".", "Working directory for agent sessions")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON (no TUI)")
-	cmd.Flags().BoolVar(&noSummary, "no-summary", false, "Skip automatic summary after session ends")
-
+	registerCommonFlags(cmd, &flags)
 	return cmd
 }

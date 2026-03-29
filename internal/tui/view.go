@@ -13,11 +13,12 @@ import (
 // colored left border per agent.
 // Format:
 //
-//	┃ claude  12:34:05
+//	┃ proponent (claude)  12:34:05
 //	┃   Message content here, potentially
 //	┃   spanning multiple lines.
-func RenderMessage(msg store.Message, width int) string {
-	name := NameStyle(msg.Author).Render(msg.Author)
+func RenderMessage(msg store.Message, width int, styles *AgentStyleRegistry) string {
+	displayName, nameStyle := styles.NameStyle(msg.Author)
+	name := nameStyle.Render(displayName)
 	ts := timestampStyle.Render(msg.Timestamp.Format("15:04:05"))
 	header := fmt.Sprintf("%s  %s", name, ts)
 
@@ -30,7 +31,7 @@ func RenderMessage(msg store.Message, width int) string {
 	body := contentStyle.Render(wrapped)
 
 	inner := header + "\n" + body
-	return MessageBorderStyle(msg.Author).Render(inner)
+	return styles.MessageBorderStyle(msg.Author).Render(inner)
 }
 
 // RenderHeader renders the debate status bar.
@@ -88,8 +89,9 @@ func RenderDivider(width int) string {
 }
 
 // RenderThinking renders a "thinking" indicator for an active agent.
-func RenderThinking(agentName string) string {
-	name := NameStyle(agentName).Render(agentName)
+func RenderThinking(agentName string, styles *AgentStyleRegistry) string {
+	displayName, nameStyle := styles.NameStyle(agentName)
+	name := nameStyle.Render(displayName)
 	dots := timestampStyle.Render("...")
 	return fmt.Sprintf("%s %s", name, dots)
 }

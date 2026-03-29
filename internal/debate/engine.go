@@ -47,6 +47,7 @@ type Engine struct {
 	config     Config
 	store      *store.Store
 	agents     []*agent.Agent
+	agentMeta  []AgentMeta // role→provider mapping for TUI/JSON display
 	debateID   string
 	herdBinary string
 	logger     *slog.Logger
@@ -60,13 +61,18 @@ type Engine struct {
 }
 
 // New creates a new debate engine. It opens the store, generates a debate ID,
-// inserts the debate record, and resolves the herd binary path.
-func New(cfg Config) (*Engine, error) {
+// inserts the debate record, and resolves the herd binary path. The agentMeta
+// slice maps role names to providers for display; it must have exactly 2
+// entries matching cfg.Models.
+func New(cfg Config, agentMeta []AgentMeta) (*Engine, error) {
 	if cfg.Question == "" {
 		return nil, fmt.Errorf("question must not be empty")
 	}
 	if len(cfg.Models) != 2 {
 		return nil, fmt.Errorf("exactly 2 models are required, got %d", len(cfg.Models))
+	}
+	if len(agentMeta) != 2 {
+		return nil, fmt.Errorf("exactly 2 agent metadata entries required, got %d", len(agentMeta))
 	}
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = "."
@@ -116,6 +122,7 @@ func New(cfg Config) (*Engine, error) {
 	return &Engine{
 		config:     cfg,
 		store:      st,
+		agentMeta:  agentMeta,
 		debateID:   debateID,
 		herdBinary: herdBinary,
 		logger:     slog.Default().With("debate_id", debateID),
@@ -181,64 +188,59 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 		e.hookCleanups = append(e.hookCleanups, cleanup)
 	}
 
-	// Determine agent pairings. For a two-agent debate, each agent's opponent
-	// is the other one.
-	models := e.config.Models
-	opponentFor := func(i int) string {
-		if len(models) == 2 {
-			return models[1-i]
-		}
-		return ""
-	}
+	// Agent names come from role-based metadata (e.g., "proponent",
+	// "connector"). Each agent's opponent is the other role name.
+	meta := e.agentMeta
 
 	// Create each agent. agent.New creates its own LLM session internally
 	// based on the provider, but does not start the run loop.
-	for i, model := range models {
+	for i := range meta {
+		opponentRole := meta[1-i].Role
+
+		provider := meta[i].Provider
 		agentCfg := agent.Config{
-			Name:     model,
-			Provider: agent.Provider(model),
-			// Model is left empty so the session uses the provider's default
-			// model. The "model" variable here is a provider name (e.g.
-			// "claude", "codex"), not a model identifier.
-			Model:        "",
+			Name:         meta[i].Role,
+			Provider:     agent.Provider(provider),
+			Model:        e.config.ModelOverrides[provider],
+			Effort:       e.config.EffortOverrides[provider],
 			WorkDir:      e.config.WorkDir,
 			Question:     e.config.Question,
-			OpponentName: opponentFor(i),
+			OpponentName: opponentRole,
 			Store:        e.store,
 			DebateID:     e.debateID,
 			HerdBinary:   e.herdBinary,
 		}
 
-		// In explore mode, the first model is the Connector (lateral
+		// In explore mode, the first agent is the Connector (lateral
 		// thinker) and the second is the Critic (reality checker).
 		if e.config.Mode == ModeExplore {
 			if i == 0 {
 				agentCfg.SystemPrompt = agent.ConnectorSystemPrompt(
-					model, opponentFor(i), e.config.Question,
+					meta[i].Role, opponentRole, e.config.Question,
 					e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.ConnectorInitialMessage
 			} else {
 				agentCfg.SystemPrompt = agent.CriticSystemPrompt(
-					model, opponentFor(i), e.config.Question,
+					meta[i].Role, opponentRole, e.config.Question,
 					e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.CriticInitialMessage
 			}
 		}
 
-		// In interrogate mode, the first model is the Advocate (plan
+		// In interrogate mode, the first agent is the Advocate (plan
 		// defender) and the second is the Interrogator (gap finder).
 		if e.config.Mode == ModeInterrogate {
 			if i == 0 {
 				agentCfg.SystemPrompt = agent.AdvocateSystemPrompt(
-					model, opponentFor(i), e.config.Question,
+					meta[i].Role, opponentRole, e.config.Question,
 					e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.AdvocateInitialMessage
 			} else {
 				agentCfg.SystemPrompt = agent.InterrogatorSystemPrompt(
-					model, opponentFor(i), e.config.Question,
+					meta[i].Role, opponentRole, e.config.Question,
 					e.herdBinary, e.debateID,
 				)
 				agentCfg.InitialMessage = agent.InterrogatorInitialMessage
@@ -252,7 +254,7 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 				started.Stop()
 			}
 			cancel()
-			return nil, fmt.Errorf("creating agent %s: %w", model, err)
+			return nil, fmt.Errorf("creating agent %s: %w", meta[i].Role, err)
 		}
 		e.agents = append(e.agents, a)
 	}
@@ -577,6 +579,11 @@ cleanup:
 // DebateID returns the unique identifier for this debate session.
 func (e *Engine) DebateID() string {
 	return e.debateID
+}
+
+// AgentMetas returns the role→provider metadata for all agents.
+func (e *Engine) AgentMetas() []AgentMeta {
+	return e.agentMeta
 }
 
 // emitEvent sends an event to the events channel without blocking. If the

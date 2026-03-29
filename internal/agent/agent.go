@@ -32,7 +32,8 @@ const (
 type Config struct {
 	Name         string
 	Provider     Provider
-	Model        string
+	Model        string // Provider-specific model ID (e.g. "opus", "gpt-5.4")
+	Effort       string // Reasoning effort level (e.g. "max", "high")
 	WorkDir      string
 	Question     string // The debate question (for system prompt)
 	OpponentName string // Name of the other agent
@@ -125,19 +126,31 @@ func createSession(ctx context.Context, cfg Config) (SessionAdapter, error) {
 
 	switch cfg.Provider {
 	case ProviderClaude:
-		return NewClaudeAdapter(ctx,
-			claudesession.WithModel(cfg.Model),
+		opts := []claudesession.SessionOption{
 			claudesession.WithWorkdir(cfg.WorkDir),
 			claudesession.WithPermissions(true),
 			claudesession.WithSystemPrompt(systemPrompt),
-		)
+		}
+		if cfg.Model != "" {
+			opts = append(opts, claudesession.WithModel(cfg.Model))
+		}
+		if cfg.Effort != "" {
+			opts = append(opts, claudesession.WithEffort(cfg.Effort))
+		}
+		return NewClaudeAdapter(ctx, opts...)
 	case ProviderCodex:
-		return NewCodexAdapter(ctx,
-			codexsession.WithModel(cfg.Model),
+		opts := []codexsession.SessionOption{
 			codexsession.WithWorkdir(cfg.WorkDir),
 			codexsession.WithFullAuto(),
 			codexsession.WithSystemPrompt(systemPrompt),
-		)
+		}
+		if cfg.Model != "" {
+			opts = append(opts, codexsession.WithModel(cfg.Model))
+		}
+		if cfg.Effort != "" {
+			opts = append(opts, codexsession.WithReasoningEffort(cfg.Effort))
+		}
+		return NewCodexAdapter(ctx, opts...)
 	default:
 		return nil, fmt.Errorf("unknown provider: %q", cfg.Provider)
 	}

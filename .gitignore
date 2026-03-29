@@ -20,3 +20,5 @@ Thumbs.db
 
 # Test
 coverage.out
+
+.claude/settings.json

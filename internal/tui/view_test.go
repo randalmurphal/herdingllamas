@@ -8,19 +8,34 @@ import (
 	"github.com/randalmurphal/herdingllamas/internal/store"
 )
 
+// testRegistry returns a style registry for tests with typical agent→provider mappings.
+func testRegistry() *AgentStyleRegistry {
+	return NewAgentStyleRegistry(
+		map[string]string{
+			"proponent": "claude",
+			"opponent":  "codex",
+		},
+		[]string{"proponent", "opponent"},
+	)
+}
+
 func TestRenderMessage_FormatAndContent(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 12, 34, 5, 0, time.UTC)
 	msg := store.Message{
-		Author:    "claude",
+		Author:    "proponent",
 		Content:   "I think Postgres is the better choice.",
 		Timestamp: ts,
 	}
 
-	result := RenderMessage(msg, 80)
+	styles := testRegistry()
+	result := RenderMessage(msg, 80, styles)
 
-	// The rendered output should contain the agent name, timestamp, and content.
+	// The rendered output should contain the role name with provider annotation.
+	if !strings.Contains(result, "proponent") {
+		t.Errorf("expected role name 'proponent' in output, got:\n%s", result)
+	}
 	if !strings.Contains(result, "claude") {
-		t.Errorf("expected agent name 'claude' in output, got:\n%s", result)
+		t.Errorf("expected provider 'claude' in output, got:\n%s", result)
 	}
 	if !strings.Contains(result, "12:34:05") {
 		t.Errorf("expected timestamp '12:34:05' in output, got:\n%s", result)
@@ -33,12 +48,13 @@ func TestRenderMessage_FormatAndContent(t *testing.T) {
 func TestRenderMessage_MultilineContent(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
 	msg := store.Message{
-		Author:    "codex",
+		Author:    "opponent",
 		Content:   "Line one.\nLine two.",
 		Timestamp: ts,
 	}
 
-	result := RenderMessage(msg, 80)
+	styles := testRegistry()
+	result := RenderMessage(msg, 80, styles)
 
 	if !strings.Contains(result, "Line one.") {
 		t.Errorf("expected first line in output, got:\n%s", result)
@@ -56,7 +72,8 @@ func TestRenderMessage_SystemMessage(t *testing.T) {
 		Timestamp: ts,
 	}
 
-	result := RenderMessage(msg, 80)
+	styles := testRegistry()
+	result := RenderMessage(msg, 80, styles)
 
 	if !strings.Contains(result, "system") {
 		t.Errorf("expected 'system' in output, got:\n%s", result)
@@ -141,10 +158,14 @@ func TestRenderDivider_FillsWidth(t *testing.T) {
 }
 
 func TestRenderThinking_ShowsAgentName(t *testing.T) {
-	result := RenderThinking("claude")
+	styles := testRegistry()
+	result := RenderThinking("proponent", styles)
 
-	if !strings.Contains(result, "claude") {
+	if !strings.Contains(result, "proponent") {
 		t.Errorf("expected agent name in thinking indicator, got:\n%s", result)
+	}
+	if !strings.Contains(result, "claude") {
+		t.Errorf("expected provider in thinking indicator, got:\n%s", result)
 	}
 	if !strings.Contains(result, "...") {
 		t.Errorf("expected dots in thinking indicator, got:\n%s", result)
@@ -203,27 +224,44 @@ func TestWrapText_LongWord(t *testing.T) {
 	}
 }
 
-func TestNameStyle_Claude(t *testing.T) {
-	style := NameStyle("claude")
-	// Verify it returns the claude-specific style by rendering and checking
-	// it produces non-empty output containing the name.
-	rendered := style.Render("claude")
-	if !strings.Contains(rendered, "claude") {
-		t.Errorf("expected 'claude' in rendered name, got: %q", rendered)
+func TestNameStyle_WithProvider(t *testing.T) {
+	styles := testRegistry()
+	displayName, style := styles.NameStyle("proponent")
+
+	if !strings.Contains(displayName, "proponent") {
+		t.Errorf("expected 'proponent' in display name, got: %q", displayName)
+	}
+	if !strings.Contains(displayName, "claude") {
+		t.Errorf("expected provider 'claude' in display name, got: %q", displayName)
+	}
+	rendered := style.Render(displayName)
+	if !strings.Contains(rendered, "proponent") {
+		t.Errorf("expected 'proponent' in rendered name, got: %q", rendered)
 	}
 }
 
-func TestNameStyle_Codex(t *testing.T) {
-	style := NameStyle("codex")
-	rendered := style.Render("codex")
-	if !strings.Contains(rendered, "codex") {
-		t.Errorf("expected 'codex' in rendered name, got: %q", rendered)
+func TestNameStyle_System(t *testing.T) {
+	styles := testRegistry()
+	displayName, style := styles.NameStyle("system")
+
+	if displayName != "system" {
+		t.Errorf("expected 'system' display name, got: %q", displayName)
+	}
+	rendered := style.Render(displayName)
+	if !strings.Contains(rendered, "system") {
+		t.Errorf("expected 'system' in rendered name, got: %q", rendered)
 	}
 }
 
-func TestNameStyle_Unknown(t *testing.T) {
-	style := NameStyle("other-agent")
-	rendered := style.Render("other-agent")
+func TestNameStyle_UnknownAgent(t *testing.T) {
+	styles := testRegistry()
+	displayName, style := styles.NameStyle("other-agent")
+
+	// Unknown agents get no provider annotation.
+	if displayName != "other-agent" {
+		t.Errorf("expected 'other-agent' display name, got: %q", displayName)
+	}
+	rendered := style.Render(displayName)
 	if !strings.Contains(rendered, "other-agent") {
 		t.Errorf("expected 'other-agent' in rendered name, got: %q", rendered)
 	}

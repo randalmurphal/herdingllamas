@@ -30,10 +30,14 @@ type Model struct {
 
 	// Rendering
 	content string // Full rendered content for viewport
+	styles  *AgentStyleRegistry
 }
 
-// New creates a new TUI model.
-func New(engine *debate.Engine, events <-chan debate.Event, question string) Model {
+// New creates a new TUI model. The providers map pairs agent role names
+// (e.g., "proponent") with their backing provider (e.g., "claude") for
+// display annotations in the chat view. agentOrder determines which agent
+// gets which color slot (first = orange, second = blue).
+func New(engine *debate.Engine, events <-chan debate.Event, question string, providers map[string]string, agentOrder []string) Model {
 	return Model{
 		events:    events,
 		engine:    engine,
@@ -41,6 +45,7 @@ func New(engine *debate.Engine, events <-chan debate.Event, question string) Mod
 		debateID:  engine.DebateID(),
 		agents:    make(map[string]bool),
 		startTime: time.Now(),
+		styles:    NewAgentStyleRegistry(providers, agentOrder),
 	}
 }
 

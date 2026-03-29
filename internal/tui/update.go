@@ -104,7 +104,7 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 	case debate.EventMessagePosted:
 		if ev.Message != nil {
 			m.messages = append(m.messages, *ev.Message)
-			m.content = renderAllMessages(m.messages, m.width)
+			m.content = renderAllMessages(m.messages, m.width, m.styles)
 			if m.ready {
 				m.viewport.SetContent(m.content)
 				m.viewport.GotoBottom()
@@ -127,7 +127,7 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 		// Add a visual "debate ended" message to the transcript.
 		endMsg := synthesizeSystemMessage("Debate concluded. Press q to exit.")
 		m.messages = append(m.messages, endMsg)
-		m.content = renderAllMessages(m.messages, m.width)
+		m.content = renderAllMessages(m.messages, m.width, m.styles)
 		if m.ready {
 			m.viewport.SetContent(m.content)
 			m.viewport.GotoBottom()
@@ -141,7 +141,7 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 		statusMsg := fmt.Sprintf("%s has proposed ending the debate", ev.Agent)
 		sysMsg := synthesizeSystemMessage(statusMsg)
 		m.messages = append(m.messages, sysMsg)
-		m.content = renderAllMessages(m.messages, m.width)
+		m.content = renderAllMessages(m.messages, m.width, m.styles)
 		if m.ready {
 			m.viewport.SetContent(m.content)
 			m.viewport.GotoBottom()
@@ -159,7 +159,7 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 			// Synthesize a system message for display.
 			sysMsg := synthesizeSystemMessage(errMsg)
 			m.messages = append(m.messages, sysMsg)
-			m.content = renderAllMessages(m.messages, m.width)
+			m.content = renderAllMessages(m.messages, m.width, m.styles)
 			if m.ready {
 				m.viewport.SetContent(m.content)
 				m.viewport.GotoBottom()
@@ -171,7 +171,7 @@ func handleDebateEvent(m Model, ev debate.Event) (tea.Model, tea.Cmd) {
 }
 
 // renderAllMessages rebuilds the full viewport content from all messages.
-func renderAllMessages(messages []store.Message, width int) string {
+func renderAllMessages(messages []store.Message, width int, styles *AgentStyleRegistry) string {
 	if len(messages) == 0 {
 		return ""
 	}
@@ -181,7 +181,7 @@ func renderAllMessages(messages []store.Message, width int) string {
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(RenderMessage(msg, width))
+		b.WriteString(RenderMessage(msg, width, styles))
 	}
 	return b.String()
 }
