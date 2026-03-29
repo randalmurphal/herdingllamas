@@ -20,7 +20,9 @@ Requires Claude Code and/or Codex CLI sessions available on your system, plus Py
 
 ### Debate
 
-The default. Two agents take opposing positions on a question and argue toward resolution. Both research the topic, both post arguments, both respond to each other.
+Two agents research a question, argue their positions, and converge on an answer. Use this when you want to stress-test a decision, compare tradeoffs, or get a well-reasoned answer to a technical question you don't want to take one model's word on.
+
+Both agents have symmetric roles — they research, post arguments, respond to each other, and concede when the other makes a stronger point.
 
 ```
 herd debate "Is TDD actually worth the overhead for small teams?"
@@ -36,11 +38,34 @@ For scripting or CI pipelines, `--json` runs headless (no TUI) and writes struct
 herd debate "Should we migrate to gRPC?" --json --max-turns 8 > result.json
 ```
 
+### Interrogate
+
+Exhaustive plan validation. Use this when you have a design doc, implementation plan, or technical proposal and you want it torn apart before you start building. The goal isn't consensus — it's finding every gap, unstated assumption, and implementation-level issue in a single session.
+
+Two agents with asymmetric roles:
+
+- **Advocate** (first model): Reads the plan and codebase deeply, builds the strongest evidence-based defense of the plan, and proactively surfaces gaps found during their deep read. Defends with specifics — file paths, function signatures, actual types. When they can't defend something, they confirm the gap and propose a fix.
+- **Interrogator** (second model): Systematically probes the plan across a 10-dimension checklist: assumptions vs. reality, data flow, integration boundaries, failure modes, state/consistency, external dependencies, operational concerns, performance, sequencing, and gaps/ambiguity. Cannot conclude until every dimension is addressed. Grounded in the plan's intent — asks not just "is this component sound?" but "does this plan actually achieve what it's trying to achieve?"
+
+Both agents do real research — web searches for known pitfalls, best practices, war stories from similar implementations — not just code reading.
+
+```
+herd interrogate "Review the design in docs/plans/migration-design.md against the existing codebase" --workdir ~/repos/my-project
+```
+
+```
+herd interrogate "Evaluate the auth rewrite proposal in DESIGN.md — check every integration point against the current middleware" --json
+```
+
+The summary output is structured as a plan assessment: confirmed strengths, identified gaps (with severity and recommended fixes), uncovered dimensions, and implementation recommendations.
+
 ### Explore
 
-The weirder, more interesting mode. Two agents with intentionally asymmetric roles:
+Lateral thinking mode. Use this when you want to see what you're not seeing — find non-obvious connections, structural parallels from unrelated domains, and ideas that wouldn't come up in a direct analysis.
 
-- **Connector** (first model): Searches *unrelated* domains for structural analogies. Explicitly forbidden from researching the topic directly. Looks at biology, economics, urban planning, game theory -- whatever shares the same underlying pattern.
+Two agents with intentionally asymmetric roles:
+
+- **Connector** (first model): Searches *unrelated* domains for structural analogies. Explicitly forbidden from researching the topic directly. Looks at biology, economics, urban planning, game theory — whatever shares the same underlying pattern.
 - **Critic** (second model): Researches the topic directly and stress-tests the Connector's analogies against reality. When an analogy implies something that doesn't exist yet, the Critic's job is to figure out what it would take to build it.
 
 The asymmetry is the point. Same-role agents converge too quickly. Different information access + different cognitive tasks = more surprising output.
@@ -51,7 +76,7 @@ herd explore "How should we approach real-time collaboration in our editor?"
 
 ### Summary
 
-Debates and explorations automatically generate a summary when they finish. To skip this, pass `--no-summary`.
+All modes automatically generate a summary when they finish. The summary format adapts to the mode — debate summaries synthesize the answer, interrogation summaries produce a structured plan assessment, and explore summaries extract actionable implications. To skip this, pass `--no-summary`.
 
 You can also generate a summary for any past session:
 
@@ -60,8 +85,6 @@ herd summary --latest
 herd summary --debate abc123
 herd summary --latest --json
 ```
-
-Output includes: direct answer, key findings, open questions, and the strongest evidence from the discussion.
 
 ## How It Works
 
@@ -111,6 +134,10 @@ Everything persists to `~/.herdingllamas/debates.db`, so you can summarize old s
 | `--json` | `false` | Output results as JSON to stdout (no TUI) |
 | `--no-summary` | `false` | Skip automatic summary after debate ends |
 
+### `herd interrogate [plan description]`
+
+Same flags as `debate`. First model becomes the Advocate, second becomes the Interrogator.
+
 ### `herd explore [topic]`
 
 Same flags as `debate`. First model becomes the Connector, second becomes the Critic.
@@ -143,7 +170,7 @@ The header shows status (LIVE/ENDED), active agent count, message count, and ela
 ## Project Structure
 
 ```
-cmd/herd/          CLI commands (debate, explore, summary, channel)
+cmd/herd/          CLI commands (debate, interrogate, explore, summary, channel)
 internal/agent/    Agent lifecycle, session adapters, system prompts
 internal/debate/   Engine orchestration, config, stop hooks
 internal/store/    SQLite persistence (messages, cursors, conclusions)
