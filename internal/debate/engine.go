@@ -169,7 +169,10 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 		openingMsg = "PROMPT REFINEMENT SESSION\n\nThe prompt under review is in your system instructions. Evaluator: systematically assess it against the evaluation checklist. Refiner: defend intentional choices and propose concrete improvements for valid findings."
 	}
 	if e.config.Mode == ModeCodeReview {
-		openingMsg = "CODE REVIEW SESSION\n\nThe diff under review is in your system instructions. Scrutinizer: review from the diff outward for correctness, safety, and edge cases. Defender: review from the system inward for architecture, intent, and integration. Post your independent findings first, then challenge each other's."
+		openingMsg = fmt.Sprintf(
+			"CODE REVIEW: %s\n\nScrutinizer: review from the diff outward for correctness, safety, and edge cases. Defender: review from the system inward for architecture, intent, and integration. Post your independent findings first, then challenge each other's.",
+			e.config.Question,
+		)
 	}
 	_, err := e.store.PostMessage(e.debateID, "moderator", openingMsg)
 	if err != nil {

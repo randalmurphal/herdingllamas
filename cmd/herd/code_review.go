@@ -88,7 +88,7 @@ access and will use git, file reads, and web search to investigate.`,
 
 			fmt.Println("Agents ready. Launching review TUI...")
 			providers := agentMetaToProviders(rc.AgentMeta)
-			m := tui.New(engine, events, "Code Review", providers, agentMetaOrder(rc.AgentMeta))
+			m := tui.New(engine, events, question, providers, agentMetaOrder(rc.AgentMeta))
 			p := tea.NewProgram(m, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
 				engine.Stop()
