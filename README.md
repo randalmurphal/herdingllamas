@@ -14,7 +14,7 @@ A single LLM will confidently give you one answer. Two LLMs forced to respond to
 go build ./cmd/herd
 ```
 
-Requires Claude Code and/or Codex CLI sessions available on your system, plus Python 3 (used internally for stop hook scripts).
+Requires Claude Code and/or Codex CLI sessions available on your system.
 
 ## Modes
 
@@ -138,8 +138,6 @@ Agents don't communicate through piped stdout. Each agent gets CLI tools (`herd 
 
 The engine polls the database every second. When agent A posts a message, the engine nudges agent B with a notification about unread messages. Agents read, think, research, and post on their own schedule. Turn numbers are assigned atomically to prevent races.
 
-Stop hooks keep agents from wandering off mid-debate. A state file tracks whether there are still unread messages or running agents, and blocks premature session exit.
-
 Everything persists to `~/.herdingllamas/debates.db`, so you can summarize old sessions or inspect the transcript later.
 
 ## CLI Reference
@@ -203,7 +201,7 @@ The header shows status (LIVE/ENDED), active agent count, message count, and ela
 ```
 cmd/herd/          CLI commands (debate, interrogate, explore, refine-prompt, summary, channel)
 internal/agent/    Agent lifecycle, session adapters, system prompts
-internal/debate/   Engine orchestration, config, stop hooks
+internal/debate/   Engine orchestration, config
 internal/store/    SQLite persistence (messages, cursors, conclusions)
 internal/tui/      Bubble Tea terminal interface
 ```

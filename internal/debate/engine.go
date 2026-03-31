@@ -55,8 +55,7 @@ type Engine struct {
 	events       chan Event
 	done         chan struct{}
 	cancel       context.CancelFunc
-	hookCleanups []func()
-	started      bool
+	started bool
 	mu           sync.Mutex
 }
 
@@ -178,23 +177,6 @@ func (e *Engine) Start(ctx context.Context) (<-chan Event, error) {
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("posting opening question: %w", err)
-	}
-
-	// Configure stop hooks so agents can't exit while the debate is active.
-	hookScript, err := GenerateStopHookScript(e.debateID)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("generating stop hook script: %w", err)
-	}
-
-	for _, model := range e.config.Models {
-		cleanup, hookErr := agent.ConfigureStopHook(agent.Provider(model), e.config.WorkDir, hookScript)
-		if hookErr != nil {
-			e.logger.Warn("failed to configure stop hook",
-				"provider", model, "error", hookErr)
-			continue
-		}
-		e.hookCleanups = append(e.hookCleanups, cleanup)
 	}
 
 	// Agent names come from role-based metadata (e.g., "proponent",
@@ -420,9 +402,6 @@ func (e *Engine) monitor(ctx context.Context) {
 					}
 				}
 
-				// Update hook state so stop hooks have current unread counts.
-				e.updateHookState()
-
 				// Check turn limit. Subtract 1 for the moderator's opening message.
 				if e.config.MaxTurns > 0 {
 					agentTurns := lastMessageCount - 1
@@ -509,9 +488,6 @@ func (e *Engine) monitor(ctx context.Context) {
 				Timestamp: time.Now().UTC(),
 			})
 
-			// Update hook state to reflect the stopped agent.
-			e.updateHookState()
-
 			// If all agents are done, the debate is over.
 			if len(agentDone) >= len(e.agents) {
 				e.logger.Info("all agents finished")
@@ -536,7 +512,7 @@ func (e *Engine) monitor(ctx context.Context) {
 }
 
 // Stop gracefully ends the debate. It cancels the context, stops all agents,
-// updates the store, and cleans up hook state. Safe to call multiple times.
+// updates the store, and closes connections. Safe to call multiple times.
 func (e *Engine) Stop() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -589,28 +565,6 @@ cleanup:
 		}
 	}
 
-	// Run hook cleanup functions to remove hook configs and temp scripts.
-	for _, cleanup := range e.hookCleanups {
-		cleanup()
-	}
-	e.hookCleanups = nil
-
-	// Update hook state to inactive so stop hooks allow exit.
-	state := DebateState{
-		DebateID: e.debateID,
-		Active:   false,
-		Agents:   make(map[string]AgentState),
-	}
-	for _, a := range e.agents {
-		state.Agents[a.Name()] = AgentState{
-			UnreadCount: 0,
-			Status:      "stopped",
-		}
-	}
-	if err := WriteState(e.debateID, state); err != nil {
-		e.logger.Error("failed to write final hook state", "error", err)
-	}
-
 	if err := e.store.Close(); err != nil {
 		e.logger.Error("failed to close store", "error", err)
 		if firstErr == nil {
@@ -643,39 +597,3 @@ func (e *Engine) emitEvent(ev Event) {
 	}
 }
 
-// updateHookState writes the current debate state to disk so that stop hook
-// scripts can make informed decisions about whether to block agent exit.
-func (e *Engine) updateHookState() {
-	state := DebateState{
-		DebateID: e.debateID,
-		Active:   true,
-		Agents:   make(map[string]AgentState),
-	}
-
-	for _, a := range e.agents {
-		unread, err := e.store.GetUnreadCount(e.debateID, a.Name())
-		if err != nil {
-			e.logger.Error("getting unread count for hook state", "agent", a.Name(), "error", err)
-			unread = 0
-		}
-
-		status := "running"
-		select {
-		case <-a.Done():
-			status = "stopped"
-			if a.Err() != nil {
-				status = "error"
-			}
-		default:
-		}
-
-		state.Agents[a.Name()] = AgentState{
-			UnreadCount: unread,
-			Status:      status,
-		}
-	}
-
-	if err := WriteState(e.debateID, state); err != nil {
-		e.logger.Error("failed to write hook state", "error", err)
-	}
-}

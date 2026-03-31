@@ -768,19 +768,3 @@ func NudgeMessage(unreadCount int, herdBinary, debateID, agentName string) strin
 	)
 }
 
-// StopHookMessage formats the message injected by the stop hook when
-// the debate is still active and there are unread messages.
-func StopHookMessage(unreadCount int, authors []string) string {
-	authorStr := "unknown"
-	if len(authors) > 0 {
-		authorStr = strings.Join(authors, ", ")
-	}
-	return fmt.Sprintf("[SYSTEM: The debate is still active. You have %d unread message(s) from %s. Read and respond before stopping.]",
-		unreadCount, authorStr)
-}
-
-// FormatIncomingMessage formats a message from another agent for delivery
-// to the session. Used by the stop hook to inject context.
-func FormatIncomingMessage(author, content string) string {
-	return fmt.Sprintf("[MESSAGE FROM %s]: %s", author, content)
-}

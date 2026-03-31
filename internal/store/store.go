@@ -62,7 +62,7 @@ type Agent struct {
 type Event struct {
 	ID        int64
 	DebateID  string
-	EventType string // nudge_sent, hook_fired, agent_started, agent_stopped, error, state_change
+	EventType string // nudge_sent, agent_started, agent_stopped, error, state_change
 	AgentName string
 	Payload   string // JSON payload with event-specific data
 	Timestamp time.Time
