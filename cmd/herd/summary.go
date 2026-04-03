@@ -15,7 +15,8 @@ import (
 
 	"github.com/randalmurphal/herdingllamas/internal/debate"
 	"github.com/randalmurphal/herdingllamas/internal/store"
-	"github.com/randalmurphal/llmkit/claude"
+	"github.com/randalmurphal/llmkit/v2"
+	_ "github.com/randalmurphal/llmkit/v2/providers"
 )
 
 // summaryJSON is the JSON output format for the summary command.
@@ -302,9 +303,13 @@ Rules:
 // generateSummary calls Claude to produce an evaluated summary of the debate.
 // The system prompt varies by mode to produce the most useful output format.
 func generateSummary(ctx context.Context, d *store.Debate, transcript string, mode debate.Mode) (string, error) {
-	client := claude.NewClaudeCLI(
-		claude.WithDangerouslySkipPermissions(),
-	)
+	client, err := llmkit.New("claude", llmkit.Config{
+		Provider: "claude",
+	})
+	if err != nil {
+		return "", fmt.Errorf("create llmkit claude client: %w", err)
+	}
+	defer client.Close()
 
 	sysPrompt := summarySystemPrompt
 	if mode == debate.ModeInterrogate {
@@ -319,14 +324,14 @@ func generateSummary(ctx context.Context, d *store.Debate, transcript string, mo
 
 	userMessage := fmt.Sprintf("Here is the full transcript of a multi-agent session. Read it carefully and produce your evaluated summary.\n\n%s", transcript)
 
-	resp, err := client.Complete(ctx, claude.CompletionRequest{
+	resp, err := client.Complete(ctx, llmkit.Request{
 		SystemPrompt: sysPrompt,
-		Messages: []claude.Message{
-			{Role: claude.RoleUser, Content: userMessage},
+		Messages: []llmkit.Message{
+			{Role: llmkit.RoleUser, Content: userMessage},
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("claude completion: %w", err)
+		return "", fmt.Errorf("llmkit completion: %w", err)
 	}
 
 	return resp.Content, nil

@@ -14,8 +14,7 @@ import (
 	"sync"
 	"time"
 
-	claudesession "github.com/randalmurphal/llmkit/claude/session"
-	codexsession "github.com/randalmurphal/llmkit/codex/session"
+	llmkit "github.com/randalmurphal/llmkit/v2"
 
 	"github.com/randalmurphal/herdingllamas/internal/store"
 )
@@ -126,31 +125,43 @@ func createSession(ctx context.Context, cfg Config) (SessionAdapter, error) {
 
 	switch cfg.Provider {
 	case ProviderClaude:
-		opts := []claudesession.SessionOption{
-			claudesession.WithWorkdir(cfg.WorkDir),
-			claudesession.WithPermissions(true),
-			claudesession.WithSystemPrompt(systemPrompt),
+		session, err := llmkit.NewSession(ctx, string(cfg.Provider), llmkit.Config{
+			Provider:        string(cfg.Provider),
+			Model:           cfg.Model,
+			WorkDir:         cfg.WorkDir,
+			SystemPrompt:    systemPrompt,
+			ReasoningEffort: cfg.Effort,
+			Runtime: llmkit.RuntimeConfig{
+				Providers: llmkit.RuntimeProviderConfig{
+					Claude: &llmkit.ClaudeRuntimeConfig{
+						DangerouslySkipPermissions: true,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return nil, err
 		}
-		if cfg.Model != "" {
-			opts = append(opts, claudesession.WithModel(cfg.Model))
-		}
-		if cfg.Effort != "" {
-			opts = append(opts, claudesession.WithEffort(cfg.Effort))
-		}
-		return NewClaudeAdapter(ctx, opts...)
+		return NewSessionAdapter(session), nil
 	case ProviderCodex:
-		opts := []codexsession.SessionOption{
-			codexsession.WithWorkdir(cfg.WorkDir),
-			codexsession.WithFullAuto(),
-			codexsession.WithSystemPrompt(systemPrompt),
+		session, err := llmkit.NewSession(ctx, string(cfg.Provider), llmkit.Config{
+			Provider:        string(cfg.Provider),
+			Model:           cfg.Model,
+			WorkDir:         cfg.WorkDir,
+			SystemPrompt:    systemPrompt,
+			ReasoningEffort: cfg.Effort,
+			Runtime: llmkit.RuntimeConfig{
+				Providers: llmkit.RuntimeProviderConfig{
+					Codex: &llmkit.CodexRuntimeConfig{
+						BypassApprovalsAndSandbox: true,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return nil, err
 		}
-		if cfg.Model != "" {
-			opts = append(opts, codexsession.WithModel(cfg.Model))
-		}
-		if cfg.Effort != "" {
-			opts = append(opts, codexsession.WithReasoningEffort(cfg.Effort))
-		}
-		return NewCodexAdapter(ctx, opts...)
+		return NewSessionAdapter(session), nil
 	default:
 		return nil, fmt.Errorf("unknown provider: %q", cfg.Provider)
 	}
